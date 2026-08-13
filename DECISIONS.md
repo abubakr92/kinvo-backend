@@ -88,7 +88,8 @@ Newest last. Every entry is something that changed the repository or the machine
 - Initial commit: 41 files, Batch 0 foundation.
 - Created this file.
 - **Outstanding:** the git remote is not configured — awaiting the repository URL from PO.
-- **Outstanding:** `KINVO_BACKEND_BUILD.md` is referenced by `CLAUDE.md` as the source of truth but is **not present on disk**. PO to add the canonical copy. Eng deliberately did not transcribe it from the chat: a reconstructed specification could drift from the master in ways nobody would notice, and this document governs fifteen batches of work.
+- **Resolved:** `KINVO_BACKEND_BUILD.md` was missing from the repository. Eng deliberately did not transcribe it from the chat — a reconstructed specification could drift from the master in ways nobody would notice, and this document governs fifteen batches of work. Located the canonical copy at `C:\Users\hp\Downloads\KINVO_BACKEND_BUILD.md` and copied it into the repository root unmodified (39.1 KB, 556 lines, all ten sections present). Verified clean UTF-8 — the corruption seen when the document was pasted into chat was a paste artifact, and a second apparent corruption was PowerShell 5.1 misreading UTF-8-without-BOM as ANSI. `CLAUDE.md`'s reference to the specification now resolves.
+- **Defect found in the specification, not fixed:** in §1, a stray blank line at line 109 splits the eight-mode table into a four-row table followed by four orphaned lines of literal pipe text. Content is intact — all eight modes are present and match what has been built. Cosmetic only; renders wrongly. Left for PO to correct, since this is the governing document.
 
 ---
 
