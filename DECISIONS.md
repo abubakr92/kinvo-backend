@@ -56,6 +56,69 @@ Roles below: **PO** = product owner (Abubakr). **Eng** = the implementing agent.
 
 ---
 
+### 1.4 Questions awaiting an answer — full options
+
+The table in 1.3 lists every open decision. This section spells out the four that
+block the next two batches, so the choice can be made without re-deriving the
+trade-offs. Delete a block once it is answered and move it to 1.2.
+
+---
+
+#### Q1 — Free-tier daily swipe cap (decision #7, blocks Batch 7)
+
+How many swipes does a free user get per day, and is the counter per mode or
+shared across all enabled modes? Resets at UTC midnight either way (spec §5.3).
+
+| Option                             | Consequence                                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **50 per mode** _(Eng recommends)_ | Each enabled mode has its own counter. Generous enough that casual users rarely hit it, tight enough to sell Premium.                                        |
+| 25 per mode                        | Users reach the paywall in one sitting. Converts faster; risks a new user exhausting the deck on day one and not returning.                                  |
+| 50 shared across all modes         | One counter for the account. Simpler to explain, but penalises multi-mode use — the exact behaviour the product exists to encourage.                         |
+| No cap at all                      | Monetise through see-who-liked-you, boost, and advanced filters instead. Contradicts spec §5.3, which mandates a cap, so this would be an explicit override. |
+
+**Dependency worth knowing:** per-mode versus shared only differs if free users
+can enable more than one mode at once. That is open decision #2, currently seeded
+as 1 mode for free. If free stays at one mode, the two options behave identically
+today and diverge only if that changes.
+
+---
+
+#### Q2 — Free-tier daily message cap (decision #7, blocks Batch 8)
+
+Spec §5.4 mandates a cap. The number is not specified.
+
+| Option                                 | Consequence                                                                                                                                                                                               |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **30 messages/day** _(Eng recommends)_ | Across all conversations. Enough for a few real exchanges; a heavy day hits the wall. Balanced.                                                                                                           |
+| 50 messages/day                        | Rarely hit in normal use. The cap becomes anti-spam protection rather than a paywall lever; revenue leans on swipes and premium features instead.                                                         |
+| 10 messages/day                        | Forces payment to hold any real conversation. High conversion pressure, high risk users conclude the app does not work.                                                                                   |
+| Cap new conversations instead          | e.g. 5 new conversations/day, unlimited messages within them. Protects conversations already going, which is what users value. Deviates from the spec's wording; would be built as a separate quota type. |
+
+---
+
+#### Q3 — Is Rewind free or premium? (decision #10, blocks Batch 7)
+
+Rewind reverses the last swipe in the current mode and restores the profile to
+the deck (spec §5.3).
+
+| Option                                                | Consequence                                                                                                                                        |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Premium only**                                      | Category standard and a reliable upsell — an accidental pass becomes a concrete reason to subscribe at the moment of regret. Strongest on revenue. |
+| Free, 1 per day _(Eng leans here on product grounds)_ | Covers the genuine mis-tap without giving the feature away, and teaches users it exists, which makes the premium version worth buying.             |
+| Free and unlimited                                    | Best experience, no revenue, and it weakens the deck: a user can undo backwards indefinitely, making "already swiped" exclusions leaky.            |
+
+---
+
+#### Q4 — Should enabling Cuddle mode require verification? (decision #9, blocks Batch 5)
+
+| Option                                                               | Consequence                                                                                                                                                                 |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Yes, required to enable** _(Eng recommends, and so does the spec)_ | §5.7 flags Cuddle as elevated risk: it invites physical-contact meetups and will attract misuse. Far easier to require from day one than to impose later on existing users. |
+| Yes, but only to message                                             | Browse the deck unverified; verify before a match can become a conversation. Lower signup friction, protection at the point where risk actually begins.                     |
+| No, treat it like any other mode                                     | Lowest friction and fastest growth in that mode. Accepts materially higher safety and moderation exposure, and a painful retrofit if incidents force the policy later.      |
+
+---
+
 ## 2. Action log
 
 Newest last. Every entry is something that changed the repository or the machine.
