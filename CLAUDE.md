@@ -60,6 +60,9 @@ npm install
 cp .env.example .env
 
 npm run db:up          # docker compose up -d  (postgres + redis)
+npm run db:deploy      # apply committed migrations
+npm run db:seed        # idempotent development data
+npm run db:reset       # drop, re-migrate, re-seed
 npm run dev            # tsx watch, hot reload
 npm run build          # tsc -> dist, path aliases rewritten by tsc-alias
 npm start              # run the build
@@ -140,6 +143,12 @@ Path aliases: `@/*`, `@config/*`, `@middleware/*`, `@modules/*`, `@utils/*`. Dec
 **Reporter anonymity (spec 5.7).** A reported user must never learn who reported them through any endpoint, notification, or error message.
 
 **Logging.** Pino only — `no-console` is an ESLint error. No PII in logs; redaction lives in `src/utils/logger.ts`. Log `req.path`, never `req.originalUrl`.
+
+**Database.** Import the client from `@/db/prisma` — never from `src/generated/prisma`, which is Prisma 7's git-ignored output directory. Prisma 7 connects through `@prisma/adapter-pg`, not a URL on the client.
+
+**PostGIS.** Prisma cannot read or write a `geography` column; those fields are `Unsupported()` in the schema. Every spatial query lives in `src/db/geo.ts` and nowhere else. Coordinate order is `(longitude, latitude)` — `ST_MakePoint` takes X then Y. Distances are always metres.
+
+**Migrations.** GIST indexes, CHECK constraints, and partial unique indexes cannot be expressed in `schema.prisma` and are hand-written at the bottom of the migration SQL. **If you regenerate a migration, re-apply them.**
 
 **Secrets.** Environment only, validated at boot. Never in code.
 

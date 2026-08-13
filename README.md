@@ -16,6 +16,8 @@ REST API for Kinvo, a multi-mode social connection app. Clients are a Flutter mo
 npm install
 cp .env.example .env      # Windows: copy .env.example .env
 npm run db:up             # postgres on :5433, redis on :6380
+npm run db:deploy         # apply migrations
+npm run db:seed           # catalogues, entitlements, venues, 30 dev users
 npm run dev
 ```
 
@@ -43,17 +45,23 @@ curl http://localhost:3000/api/v1/health
 
 ## Scripts
 
-| Command                     | Purpose                                    |
-| --------------------------- | ------------------------------------------ |
-| `npm run dev`               | Watch mode via tsx                         |
-| `npm run build`             | Compile to `dist/`, rewriting path aliases |
-| `npm start`                 | Run the compiled build                     |
-| `npm test`                  | Jest suite                                 |
-| `npm run test:coverage`     | Coverage with the 80% threshold enforced   |
-| `npm run typecheck`         | `tsc --noEmit`                             |
-| `npm run lint` / `lint:fix` | ESLint                                     |
-| `npm run format`            | Prettier                                   |
-| `npm run db:up` / `db:down` | Start / stop Postgres and Redis            |
+| Command                     | Purpose                                              |
+| --------------------------- | ---------------------------------------------------- |
+| `npm run dev`               | Watch mode via tsx                                   |
+| `npm run build`             | Compile to `dist/`, rewriting path aliases           |
+| `npm start`                 | Run the compiled build                               |
+| `npm test`                  | Jest suite                                           |
+| `npm run test:coverage`     | Coverage with the 80% threshold enforced             |
+| `npm run typecheck`         | `tsc --noEmit`                                       |
+| `npm run lint` / `lint:fix` | ESLint                                               |
+| `npm run format`            | Prettier                                             |
+| `npm run db:up` / `db:down` | Start / stop Postgres and Redis                      |
+| `npm run db:migrate`        | Create and apply a migration (development)           |
+| `npm run db:deploy`         | Apply committed migrations (CI, staging, production) |
+| `npm run db:seed`           | Populate development data (idempotent)               |
+| `npm run db:reset`          | Drop, re-migrate, re-seed                            |
+| `npm run db:generate`       | Regenerate the Prisma client                         |
+| `npm run db:studio`         | Browse the database in Prisma Studio                 |
 
 ## Configuration
 
@@ -63,4 +71,6 @@ Every variable is documented in `.env.example` and validated by `src/config/env.
 
 - The API is versioned at `/api/v1`.
 - Docker publishes Postgres on **5433** and Redis on **6380** to avoid colliding with local installs. A `kinvo_test` database is created on first container start for the test suite.
-- Batch 0 has no database access, so `npm test` runs without Docker. From Batch 1 onward, tests require `npm run db:up`.
+- **Tests require Docker.** `npm test` migrates the `kinvo_test` database automatically before running, and truncates it between tests. It never touches `kinvo_dev`.
+- Prisma 7 generates its client into `src/generated/prisma` (git-ignored, rebuilt on install). Import from `@/db/prisma`, never from that path directly.
+- PostGIS columns cannot be read or written through Prisma. All spatial queries live in `src/db/geo.ts`.

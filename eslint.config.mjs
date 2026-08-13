@@ -5,7 +5,13 @@ import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'prisma/migrations/**'],
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'src/generated/**',
+      'prisma/migrations/**',
+    ],
   },
 
   js.configs.recommended,

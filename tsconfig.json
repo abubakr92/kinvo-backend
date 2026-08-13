@@ -29,6 +29,6 @@
     "declaration": false,
     "types": ["node", "jest"]
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "prisma/**/*.ts", "prisma.config.ts"],
   "exclude": ["node_modules", "dist", "coverage"]
 }

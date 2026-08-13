@@ -94,6 +94,19 @@ Newest last. Every entry is something that changed the repository or the machine
 
 ---
 
+### 2026-08-14 — Batch 1: Database schema
+
+- Installed Prisma **7.9.1**. Prisma 7 differs from 5/6 in three ways that shaped this batch:
+  1. The datasource URL moved out of `schema.prisma` into a root `prisma.config.ts`.
+  2. The generator is `prisma-client` (TypeScript output) with a required `output` path — the client is emitted into the project tree, not `node_modules`. Placed at `src/generated/prisma` so the compiler's `rootDir` covers it; the first attempt at repository root broke `npm run build`.
+  3. **The client no longer connects by URL.** A driver adapter is mandatory, so `@prisma/adapter-pg` was installed. Flagged because it is a real dependency the spec did not anticipate.
+- Wrote `prisma/schema.prisma`: 48 models, 31 Postgres enums, indexes on every foreign key and every query path the spec names.
+- Hand-wrote what Prisma cannot express at the foot of the migration: `CREATE EXTENSION postgis`, 4 GIST indexes, 12 CHECK constraints, 3 partial unique indexes.
+- **Verified:** migration applies clean to an empty database · 50 tables · 31 enum types · PostGIS 3.4.3 · every GIST index, CHECK constraint, and partial unique index present in `pg_indexes` / `pg_constraint`.
+- Seeded 43 interests, 13 prompt questions, 11 entitlement flags across 3 tiers, 6 subscription products with price versions, 20 venues, and 30 dev users. **Verified idempotent** by running the seed twice and confirming row counts did not double.
+- **Verified:** 111 tests passing, 92.12% line coverage · `npm test` bootstraps a dropped-and-recreated `kinvo_test` from nothing · typecheck, lint, format, and build all clean.
+- Two Windows-specific problems found and fixed in `tests/globalSetup.ts`: Node refuses to spawn `npx.cmd` without a shell (EINVAL, post-CVE-2024-27980), and passing args through a shell does not escape them (DEP0190). Resolved by running the Prisma CLI's JavaScript with `process.execPath`, which also works unchanged on Linux for CI.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -101,8 +114,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | Batch | Name                        | Status | Needs installed / provisioned                                | Blocked by decisions           |
 | ----- | --------------------------- | ------ | ------------------------------------------------------------ | ------------------------------ |
 | 0     | Foundation                  | ✅     | Node 24, npm                                                 | —                              |
-| 1     | Database schema             | ▶      | **Docker** (Postgres + PostGIS, Redis)                       | — (#2/#3 seeded provisionally) |
-| 2     | Auth                        | ⬜     | Docker. Twilio Verify (mocked in tests)                      | —                              |
+| 1     | Database schema             | ✅     | **Docker** (Postgres + PostGIS, Redis)                       | — (#2/#3 seeded provisionally) |
+| 2     | Auth                        | ▶      | Docker. Twilio Verify (mocked in tests)                      | —                              |
 | 3     | Users, profiles, onboarding | ⬜     | Docker                                                       | —                              |
 | **—** | **Deployment interlude**    | ⬜     | **AWS account + IAM user, AWS CLI, Terraform, domain name**  | —                              |
 | 4     | Media and verification      | ⬜     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |

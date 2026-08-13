@@ -21,9 +21,18 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage --runInBand",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "prisma migrate reset --force",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "compression": "^1.8.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -46,11 +55,17 @@
     "jest": "^29.7.0",
     "pino-pretty": "^13.0.0",
     "prettier": "^3.4.2",
+    "prisma": "^7.9.1",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
     "tsc-alias": "^1.8.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "prisma@7.9.1": true,
+    "@prisma/engines@7.9.1": true
   }
 }
