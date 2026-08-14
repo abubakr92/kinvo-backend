@@ -208,7 +208,18 @@ Accepted risks, recorded rather than fixed:
 - `forgot-password` returns the reset token in the response body outside production, so the flow is testable before email lands in Batch 11. **Staging must run `NODE_ENV=production`**, or reset tokens are exposed.
 - `display_name` is stored verbatim, including markup. Correct for a Flutter client that renders text, but the admin web console must escape on output (Batch 15).
 - `resetPassword` resolves the email identity with `findFirst`. Unambiguous today because the linking rules give a user at most one email identity; it would become ambiguous if that ever changes.
+- **Account deletion does not scrub personal data.** `DELETE /users/me` soft-deletes, revokes every session, and removes the user from every read path, but email, phone, display name, and bio are retained in full. Reports, moderation history, and evidence retention all reference the user, and deciding what must survive an erasure request is a safety question Batch 12 answers. **This is a GDPR exposure until then** — recorded deliberately rather than discovered later, and it must be closed before real users exist.
 - Refresh rotation is not transactional, so two simultaneous refreshes can both succeed and leave two live chains in one family. Replay detection still works; worth a row lock if it ever shows up in practice.
+
+### 2026-08-14 — Batch 3: Users, profiles, onboarding
+
+- Eleven endpoints: `GET /config`, profile read/update, location, interests, prompts, preview, public profile, account deletion, and the onboarding status/date-of-birth/complete trio. Added `GET /health/ready`.
+- **Built the shared block exclusion clause now rather than in Batch 12.** `GET /users/:id` is the first endpoint that exposes another user, so deferring it would have shipped a leak for Batch 12 to remember to close. `src/modules/safety/block.service.ts` holds it; Batch 12 adds the block/unblock endpoints on top of a helper that is already enforced and tested.
+- **`GET /config` landed here.** Spec §4.12 defines it but assigns it to no batch, and Batch 3 is the first that needs interest tags and prompt questions client-side. It serves the per-mode deck action labels, which is what keeps spec §1's "the mode only changes the label" true without an app release per mode.
+- **Onboarding requirements are a declared checklist**, not scattered conditionals: display_name, date_of_birth (18+), bio, location, ≥1 interest. Batch 4 and 5 add one entry each.
+- **Account deletion is a soft delete only.** Personal data is deliberately not scrubbed — see the accepted risk below.
+- **Two production bugs found while fixing a hanging test.** `server.ts` never opened or closed its Postgres and Redis connections: a bad connection string became a 500 on a user's first request instead of a failure at deploy time, and shutdown severed in-flight queries and leaked pool connections. Now connects before accepting traffic and disconnects after the HTTP server drains.
+- **Verified:** all Batch 3 suites green.
 
 ## 3. Batch plan and dependencies
 
@@ -219,7 +230,7 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 0     | Foundation                  | ✅     | Node 24, npm                                                 | —                              |
 | 1     | Database schema             | ✅     | **Docker** (Postgres + PostGIS, Redis)                       | — (#2/#3 seeded provisionally) |
 | 2     | Auth                        | ✅     | Docker. Twilio Verify (mocked in tests)                      | —                              |
-| 3     | Users, profiles, onboarding | ▶      | Docker                                                       | —                              |
+| 3     | Users, profiles, onboarding | ✅     | Docker                                                       | —                              |
 | **—** | **Deployment interlude**    | ⬜     | **AWS account + IAM user, AWS CLI, Terraform, domain name**  | —                              |
 | 4     | Media and verification      | ⬜     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |
 | 5     | Modes and settings          | ⬜     | Docker                                                       | **#9**                         |

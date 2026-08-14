@@ -146,7 +146,16 @@ Never widen `req.user` from a token claim. `authenticate` loads the user on ever
 
 **Quota vs rate limit.** Infrastructure protection → `429 RATE_LIMITED`. Business limits that sell subscriptions → `422 QUOTA_EXCEEDED` with paywall context. Conflating them hides the paywall and costs revenue.
 
-**Blocks (spec 5.5).** Blocks beat everything. Enforce via a **single shared exclusion clause** reused by every query — never re-implemented per endpoint. Return `404`, not `403`, when a block is the reason; a 403 confirms the resource exists.
+**Blocks (spec 5.5).** Blocks beat everything. The shared exclusion clause lives in `src/modules/safety/block.service.ts` and **must never be re-implemented**:
+
+- `visibleUserFilter(viewerId, blockedIds)` — compose into the `where` of any query that can surface another user. It already excludes blocked-either-direction, self, suspended, soft-deleted, and snoozed.
+- `assertVisible(viewerId, targetId)` — call before returning anything about a specific user. Throws `404`.
+
+Return `404`, not `403`, when a block is the reason; a 403 confirms the resource exists. "Blocked", "suspended", "deleted", and "never existed" must be byte-identical from outside.
+
+**Compact objects (spec 4.7).** `user_compact` is built only by `toUserCompact()` in `src/utils/compact.ts`. It becomes one Dart model, so every list that returns a user returns exactly that shape.
+
+**Onboarding.** The requirement list is a declared checklist in `src/modules/users/onboarding.service.ts`. Adding a requirement is one entry there — never a new condition scattered into the transition. Batch 4 adds "≥1 approved photo", Batch 5 adds "≥1 enabled mode".
 
 **Reporter anonymity (spec 5.7).** A reported user must never learn who reported them through any endpoint, notification, or error message.
 

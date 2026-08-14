@@ -3,16 +3,42 @@ import type { Server } from 'node:http';
 import { app } from '@/app';
 import { API_PREFIX } from '@config/constants';
 import { env } from '@config/env';
+import { connectDatabase, disconnectDatabase } from '@/db/prisma';
+import { connectRedis, disconnectRedis } from '@/db/redis';
 import { logger } from '@utils/logger';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
-const server: Server = app.listen(env.PORT, env.HOST, () => {
-  logger.info(
-    { port: env.PORT, host: env.HOST, environment: env.NODE_ENV, api_prefix: API_PREFIX },
-    'kinvo api listening',
-  );
-});
+/**
+ * Open both connections before accepting traffic.
+ *
+ * Prisma and ioredis would both connect lazily on first use, but that turns a
+ * bad connection string into a 500 on a user's first request instead of a
+ * failure at deploy time — and a rolling deploy would happily replace healthy
+ * instances with broken ones.
+ */
+async function start(): Promise<Server> {
+  await connectDatabase();
+  await connectRedis();
+
+  return app.listen(env.PORT, env.HOST, () => {
+    logger.info(
+      { port: env.PORT, host: env.HOST, environment: env.NODE_ENV, api_prefix: API_PREFIX },
+      'kinvo api listening',
+    );
+  });
+}
+
+let server: Server | undefined;
+
+void start()
+  .then((listening) => {
+    server = listening;
+  })
+  .catch((error: unknown) => {
+    logger.fatal({ err: error }, 'failed to start');
+    process.exit(1);
+  });
 
 let shuttingDown = false;
 
@@ -32,13 +58,26 @@ function shutdown(signal: string): void {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
+  const closeConnections = async (): Promise<void> => {
+    // Only after the HTTP server has stopped accepting and drained, or we would
+    // sever queries belonging to requests still in flight.
+    await Promise.allSettled([disconnectDatabase(), disconnectRedis()]);
+  };
+
+  if (!server) {
+    void closeConnections().finally(() => process.exit(0));
+    return;
+  }
+
   server.close((error) => {
     if (error) {
       logger.error({ err: error }, 'error while closing server');
-      process.exit(1);
     }
-    logger.info('shutdown complete');
-    process.exit(0);
+
+    void closeConnections().finally(() => {
+      logger.info('shutdown complete');
+      process.exit(error ? 1 : 0);
+    });
   });
 }
 
