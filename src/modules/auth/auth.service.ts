@@ -48,28 +48,22 @@ export async function register(input: RegisterInput): Promise<AuthTokens> {
   });
 
   if (existing) {
-    // The address may already be here as a link-only identity created by social
-    // sign-in, which has no password. Setting one turns it into a real email
-    // login for the SAME user rather than creating a second account (spec §5.1).
-    if (!existing.password_hash) {
-      await prisma.authIdentity.update({
-        where: { id: existing.id },
-        data: { password_hash: await hashPassword(input.password) },
-      });
-
-      await prisma.user.update({
-        where: { id: existing.user_id },
-        data: {
-          date_of_birth: dateOfBirth,
-          display_name: input.display_name.trim(),
-        },
-      });
-
-      logger.info({ user_id: existing.user_id }, 'attached password to social-created account');
-      return issueTokenPair(existing.user_id, { deviceId: input.device_id });
-    }
-
-    throw new ApiError(ERROR_CODES.CONFLICT, 'An account with that email already exists.');
+    // ACCOUNT TAKEOVER GUARD — do not "helpfully" attach a password here.
+    //
+    // Social sign-in records the user's verified address as an email identity
+    // with no password, so that a later Google or Apple sign-in links rather
+    // than duplicating (spec §5.1). An earlier version of this method treated
+    // that empty password as an invitation to set one and returned tokens.
+    // That handed the account to anyone who knew the address: no mailbox proof,
+    // no verification, nothing.
+    //
+    // Registration therefore always refuses an address that is already here.
+    // The legitimate route to a first password on a social account is
+    // forgot-password, which requires control of the mailbox.
+    throw new ApiError(
+      ERROR_CODES.CONFLICT,
+      'An account with that email already exists. Try signing in, or reset your password.',
+    );
   }
 
   const user = await prisma.user.create({

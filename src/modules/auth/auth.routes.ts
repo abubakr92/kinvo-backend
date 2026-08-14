@@ -5,8 +5,11 @@ import {
   loginRateLimit,
   otpSendRateLimit,
   otpVerifyRateLimit,
+  passwordResetConfirmRateLimit,
   passwordResetRateLimit,
+  refreshRateLimit,
   registerRateLimit,
+  socialSignInRateLimit,
 } from '@middleware/rate-limit';
 import { validate } from '@middleware/validate';
 import { asyncHandler } from '@utils/async-handler';
@@ -49,7 +52,12 @@ authRouter.post(
   asyncHandler(controller.login),
 );
 
-authRouter.post('/refresh', validate({ body: refreshSchema }), asyncHandler(controller.refresh));
+authRouter.post(
+  '/refresh',
+  refreshRateLimit,
+  validate({ body: refreshSchema }),
+  asyncHandler(controller.refresh),
+);
 
 authRouter.post('/logout', validate({ body: logoutSchema }), asyncHandler(controller.logout));
 
@@ -62,6 +70,7 @@ authRouter.post(
 
 authRouter.post(
   '/reset-password',
+  passwordResetConfirmRateLimit,
   validate({ body: resetPasswordSchema }),
   asyncHandler(controller.resetPassword),
 );
@@ -89,12 +98,14 @@ authRouter.post(
 
 authRouter.post(
   '/google',
+  socialSignInRateLimit,
   validate({ body: googleSignInSchema }),
   asyncHandler(controller.googleSignIn),
 );
 
 authRouter.post(
   '/apple',
+  socialSignInRateLimit,
   validate({ body: appleSignInSchema }),
   asyncHandler(controller.appleSignIn),
 );

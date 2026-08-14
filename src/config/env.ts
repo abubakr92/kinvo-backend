@@ -134,20 +134,36 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new EnvValidationError(issues);
   }
 
-  if (result.data.NODE_ENV === 'production') {
-    const missing: Record<string, string[]> = {};
+  const issues: Record<string, string[]> = {};
 
+  /**
+   * The two signing keys must differ. If they are the same, the only thing
+   * separating an access token from a refresh token is the `type` claim, and a
+   * single missed check anywhere turns a 30-minute token into a 60-day one.
+   */
+  if (result.data.JWT_ACCESS_SECRET === result.data.JWT_REFRESH_SECRET) {
+    issues.JWT_REFRESH_SECRET = ['must be different from JWT_ACCESS_SECRET'];
+  }
+
+  if (result.data.NODE_ENV === 'production') {
     for (const { key, message } of PRODUCTION_REQUIRED) {
       const value = result.data[key];
       const isEmpty = value === undefined || (Array.isArray(value) ? value.length === 0 : false);
       if (isEmpty) {
-        missing[key] = [message];
+        issues[key] = [message];
       }
     }
 
-    if (Object.keys(missing).length > 0) {
-      throw new EnvValidationError(missing);
+    // A wildcard origin in production lets any site call the API from a
+    // browser. Harmless while the only client is a mobile app, but the admin
+    // web console arrives later and this is the moment to refuse it.
+    if (result.data.CORS_ORIGINS.includes('*')) {
+      issues.CORS_ORIGINS = ['must list explicit origins in production, not "*"'];
     }
+  }
+
+  if (Object.keys(issues).length > 0) {
+    throw new EnvValidationError(issues);
   }
 
   return result.data;

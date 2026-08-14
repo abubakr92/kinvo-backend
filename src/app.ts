@@ -7,6 +7,7 @@ import { API_PREFIX } from '@config/constants';
 import { env } from '@config/env';
 import { errorHandler } from '@middleware/error-handler';
 import { notFound } from '@middleware/not-found';
+import { generalRateLimit } from '@middleware/rate-limit';
 import { requestId } from '@middleware/request-id';
 import { requestLogger } from '@middleware/request-logger';
 import { healthRouter } from '@modules/health/health.routes';
@@ -43,9 +44,14 @@ export function createApp(): Express {
   app.use(requestLogger);
 
   // Unversioned alias for load balancers and container probes, which cannot be
-  // told to follow an API version.
+  // told to follow an API version. Deliberately ahead of the rate limiter —
+  // probes poll continuously and must never be throttled.
   app.use('/health', healthRouter);
-  app.use(API_PREFIX, apiRouter);
+
+  // A ceiling under every versioned route (spec §4.9). Routes that need
+  // tighter bounds add their own limiter on top; this is here so that
+  // forgetting to add one is not an unbounded endpoint.
+  app.use(API_PREFIX, generalRateLimit, apiRouter);
 
   app.use(notFound);
   app.use(errorHandler);

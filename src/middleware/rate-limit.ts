@@ -152,7 +152,43 @@ export const passwordResetRateLimit = build({
   message: 'Too many reset requests. Please check your inbox and try again later.',
 });
 
-/** Broad ceiling for everything else; individual routes tighten as needed. */
+/**
+ * Redeeming a reset token. The tokens carry 256 bits of entropy so guessing is
+ * not the threat; this bounds the damage from a caller grinding the endpoint.
+ */
+export const passwordResetConfirmRateLimit = build({
+  name: 'password-reset-confirm',
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+});
+
+/**
+ * Social sign-in reaches out to Google or Apple on every call, so an unbounded
+ * endpoint lets anyone spend our request quota with those providers and stall
+ * real sign-ins behind it.
+ */
+export const socialSignInRateLimit = build({
+  name: 'social-signin',
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+});
+
+/** Token rotation. Bounded so a leaked token cannot be used to hammer the API. */
+export const refreshRateLimit = build({
+  name: 'refresh',
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+});
+
+/**
+ * The floor under every versioned route, mounted in app.ts.
+ *
+ * Without this, any endpoint that has no specific limiter has no ceiling at
+ * all. Routes that need tighter bounds add their own on top; this exists so
+ * that forgetting to is not a hole.
+ *
+ * Deliberately not applied to /health, which load balancers poll continuously.
+ */
 export const generalRateLimit = build({
   name: 'general',
   windowMs: 15 * 60 * 1000,

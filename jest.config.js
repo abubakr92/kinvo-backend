@@ -40,6 +40,12 @@ module.exports = {
   },
   coverageReporters: ['text-summary', 'lcov'],
 
+  // Every suite shares one test database and truncates it between tests, so
+  // parallel workers would wipe each other's rows mid-test. `npm test` passes
+  // --runInBand, but this makes a bare `npx jest` safe too rather than leaving
+  // it as a convention someone can forget.
+  maxWorkers: 1,
+
   clearMocks: true,
   restoreMocks: true,
   // Integration tests truncate and re-seed against a real Postgres.

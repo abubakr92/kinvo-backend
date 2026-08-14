@@ -191,6 +191,25 @@ Newest last. Every entry is something that changed the repository or the machine
 - **Verified end to end against the running build**, not only through Supertest: login → `/auth/me` → refresh → replay rejected 401 → wrong password rejected 401.
 - `jose` was installed, then removed: ESM-only, unloadable by the CommonJS test runner. `jwks-rsa` was tried next and failed identically because it depends on `jose`. Apple verification ended up needing no library at all.
 
+### 2026-08-14 — Security audit of Batches 0–2
+
+Requested by PO before starting Batch 3. Findings and fixes:
+
+- **CRITICAL — account takeover via registration. Fixed.** Social sign-in records the user's verified address as an email identity with no password, so a later Google or Apple sign-in links rather than duplicating. `register` treated that empty password as an invitation to set one and returned tokens, so anyone who knew the address of a Google- or Apple-created account could take it over with no proof of mailbox ownership. Registration now always returns 409 for an existing address; the legitimate route to a first password is forgot-password, which requires mailbox control. A test had asserted the vulnerable behaviour and was rewritten. `tests/integration/auth/security.test.ts` now covers it.
+- **HIGH — no rate limit on four public endpoints. Fixed.** `generalRateLimit` existed but was never mounted, so `/refresh`, `/reset-password`, `/google`, and `/apple` had no ceiling at all. `/google` and `/apple` make outbound calls to Google and Apple, so an unbounded endpoint let anyone spend our provider quota. Mounted `generalRateLimit` under the whole versioned router and added specific limiters for those four. `/health` is deliberately ahead of the limiter so load-balancer probes are never throttled.
+- **MEDIUM — identical JWT secrets were accepted. Fixed.** If both keys matched, only the `type` claim separated a 30-minute token from a 60-day one. Env validation now refuses to start.
+- **MEDIUM — wildcard CORS was accepted in production. Fixed.** Harmless while the only client is a mobile app, but the admin web console is coming. Env validation now refuses `*` in production.
+- **LOW — tests could corrupt each other.** All suites share one database and truncate between tests; only `npm test`'s `--runInBand` prevented parallel workers wiping each other. `maxWorkers: 1` is now in the Jest config so a bare `npx jest` is safe too.
+
+Verified clean, no change needed: no secrets in any commit; no `console.*` in `src/`; every response goes through the envelope; all raw SQL parameterised through tagged templates, with the one `$executeRawUnsafe` confined to test teardown over `pg_tables` names; PII redaction configured for authorization, cookie, password, token, email, and phone; request logger records `req.path` and never the query string; helmet emitting CSP, HSTS, nosniff, and frame-options.
+
+Accepted risks, recorded rather than fixed:
+
+- `forgot-password` returns the reset token in the response body outside production, so the flow is testable before email lands in Batch 11. **Staging must run `NODE_ENV=production`**, or reset tokens are exposed.
+- `display_name` is stored verbatim, including markup. Correct for a Flutter client that renders text, but the admin web console must escape on output (Batch 15).
+- `resetPassword` resolves the email identity with `findFirst`. Unambiguous today because the linking rules give a user at most one email identity; it would become ambiguous if that ever changes.
+- Refresh rotation is not transactional, so two simultaneous refreshes can both succeed and leave two live chains in one family. Replay detection still works; worth a row lock if it ever shows up in practice.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started

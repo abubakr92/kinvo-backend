@@ -16,6 +16,7 @@ const PRODUCTION_CREDENTIALS: NodeJS.ProcessEnv = {
   TWILIO_VERIFY_SERVICE_SID: 'VA00000000000000000000000000000000',
   GOOGLE_OAUTH_CLIENT_IDS: 'client-id.apps.googleusercontent.com',
   APPLE_CLIENT_IDS: 'com.kinvo.app',
+  CORS_ORIGINS: 'https://admin.kinvo.app',
 };
 
 describe('environment validation (spec 7, Batch 0)', () => {
@@ -103,6 +104,25 @@ describe('environment validation (spec 7, Batch 0)', () => {
     } catch (error) {
       expect((error as EnvValidationError).issues).toHaveProperty('TWILIO_AUTH_TOKEN');
     }
+  });
+
+  it('refuses identical access and refresh signing secrets', () => {
+    // If they match, only the `type` claim separates a 30-minute token from a
+    // 60-day one, and one missed check anywhere collapses that distinction.
+    const shared = 'the-very-same-secret-used-for-both-of-them';
+
+    expect(() =>
+      parseEnv({ ...VALID, JWT_ACCESS_SECRET: shared, JWT_REFRESH_SECRET: shared }),
+    ).toThrow(EnvValidationError);
+  });
+
+  it('refuses a wildcard CORS origin in production', () => {
+    expect(() =>
+      parseEnv({ ...VALID, ...PRODUCTION_CREDENTIALS, NODE_ENV: 'production', CORS_ORIGINS: '*' }),
+    ).toThrow(EnvValidationError);
+
+    // Still fine in development, where there is no browser client to protect.
+    expect(() => parseEnv({ ...VALID, CORS_ORIGINS: '*' })).not.toThrow();
   });
 
   it('splits comma-separated social client IDs', () => {

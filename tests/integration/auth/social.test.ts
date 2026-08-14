@@ -136,7 +136,7 @@ describe('POST /auth/google', () => {
       expect(await prisma.user.count()).toBe(1);
     });
 
-    it('lets a social-created account later set a password without duplicating', async () => {
+    it('refuses registration against an address a social account already holds', async () => {
       const email = 'social.first@example.com';
 
       await api.post(`${AUTH_BASE}/google`).send({
@@ -150,11 +150,10 @@ describe('POST /auth/google', () => {
         date_of_birth: '1999-03-14',
       });
 
-      expect(register.status).toBe(201);
+      // Setting a password here would be account takeover — the caller has
+      // proved nothing about owning the mailbox. See security.test.ts.
+      expect(register.status).toBe(409);
       expect(await prisma.user.count()).toBe(1);
-
-      const login = await api.post(`${AUTH_BASE}/login`).send({ email, password: TEST_PASSWORD });
-      expect(login.status).toBe(200);
     });
   });
 
