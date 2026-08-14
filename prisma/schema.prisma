@@ -363,9 +363,15 @@ model User {
   display_name String @db.VarChar(50)
 
   /// spec §5.1: store date of birth, NEVER an age integer. Age is computed.
-  /// Under-18 is rejected at registration, which happens before a Profile
-  /// exists — another reason this column is on User.
-  date_of_birth DateTime @db.Date
+  ///
+  /// Nullable because Google, Apple, and Twilio do not supply a date of birth,
+  /// so a social or phone signup cannot know the user's age at the moment the
+  /// account is created. The under-18 rejection therefore fires the instant a
+  /// date of birth is set, and a user without one stays `pending` — blocked from
+  /// discovery, matching, and chat with ONBOARDING_INCOMPLETE. Nobody under 18
+  /// ever reaches the product, which is what §5.1 is actually protecting.
+  /// Email registration still requires it up front.
+  date_of_birth DateTime? @db.Date
 
   status            UserStatus       @default(pending)
   role              UserRole         @default(user)

@@ -72,5 +72,7 @@ Every variable is documented in `.env.example` and validated by `src/config/env.
 - The API is versioned at `/api/v1`.
 - Docker publishes Postgres on **5433** and Redis on **6380** to avoid colliding with local installs. A `kinvo_test` database is created on first container start for the test suite.
 - **Tests require Docker.** `npm test` migrates the `kinvo_test` database automatically before running, and truncates it between tests. It never touches `kinvo_dev`.
+- After seeding, sign in as any dev user — for example `sarah.dev@kinvo.test` / `kinvo-dev-password`.
+- Without Twilio credentials, phone OTP falls back to a development stub that sends no SMS and accepts the code `000000`. Production refuses to start without real credentials, so that stub cannot reach real users.
 - Prisma 7 generates its client into `src/generated/prisma` (git-ignored, rebuilt on install). Import from `@/db/prisma`, never from that path directly.
 - PostGIS columns cannot be read or written through Prisma. All spatial queries live in `src/db/geo.ts`.

@@ -44,6 +44,45 @@ export const envSchema = z.object({
 
   // Accepted by express.json / express.urlencoded (e.g. "1mb", "512kb").
   JSON_BODY_LIMIT: z.string().min(2).default('1mb'),
+
+  // --- Auth (Batch 2) ------------------------------------------------------
+  // No defaults, ever. A signing secret with a fallback value is not a secret,
+  // and a deployment that silently boots with a known key is forgeable.
+  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+  JWT_ISSUER: z.string().min(1).default('kinvo'),
+
+  /// spec §7 Batch 2: password reset tokens are single-use with a one-hour expiry.
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(60),
+
+  // --- External identity providers ----------------------------------------
+  // Optional so development and tests boot without third-party credentials;
+  // required in production by the refinement below.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
+
+  // Comma-separated: iOS, Android, and web client IDs are all valid audiences.
+  GOOGLE_OAUTH_CLIENT_IDS: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0),
+    ),
+
+  // Comma-separated Apple bundle identifiers / service IDs.
+  APPLE_CLIENT_IDS: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0),
+    ),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -65,6 +104,19 @@ export class EnvValidationError extends Error {
  * Pure parser, exported so tests can exercise validation without touching the
  * real process environment or resetting the module registry.
  */
+/**
+ * Credentials that development and test may omit but production may not.
+ * Booting production without them would mean OTP and social sign-in failing at
+ * the first real request instead of at deploy time.
+ */
+const PRODUCTION_REQUIRED: { key: keyof Env; message: string }[] = [
+  { key: 'TWILIO_ACCOUNT_SID', message: 'required in production for OTP delivery' },
+  { key: 'TWILIO_AUTH_TOKEN', message: 'required in production for OTP delivery' },
+  { key: 'TWILIO_VERIFY_SERVICE_SID', message: 'required in production for OTP delivery' },
+  { key: 'GOOGLE_OAUTH_CLIENT_IDS', message: 'required in production for Google sign-in' },
+  { key: 'APPLE_CLIENT_IDS', message: 'required in production for Apple sign-in' },
+];
+
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const result = envSchema.safeParse(source);
 
@@ -80,6 +132,22 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
       }
     }
     throw new EnvValidationError(issues);
+  }
+
+  if (result.data.NODE_ENV === 'production') {
+    const missing: Record<string, string[]> = {};
+
+    for (const { key, message } of PRODUCTION_REQUIRED) {
+      const value = result.data[key];
+      const isEmpty = value === undefined || (Array.isArray(value) ? value.length === 0 : false);
+      if (isEmpty) {
+        missing[key] = [message];
+      }
+    }
+
+    if (Object.keys(missing).length > 0) {
+      throw new EnvValidationError(missing);
+    }
   }
 
   return result.data;

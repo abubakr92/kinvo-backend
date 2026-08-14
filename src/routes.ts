@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { authRouter } from '@modules/auth/auth.routes';
 import { healthRouter } from '@modules/health/health.routes';
 
 /**
@@ -8,3 +9,4 @@ import { healthRouter } from '@modules/health/health.routes';
 export const apiRouter: Router = Router();
 
 apiRouter.use('/health', healthRouter);
+apiRouter.use('/auth', authRouter);

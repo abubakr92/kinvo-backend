@@ -33,12 +33,19 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "argon2": "^0.45.1",
     "compression": "^1.8.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.6.2",
+    "google-auth-library": "^11.0.2",
     "helmet": "^8.0.0",
+    "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
     "pino": "^9.6.0",
+    "rate-limit-redis": "^6.0.1",
+    "twilio": "^6.1.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -47,6 +54,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.14",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.0",
     "@types/supertest": "^6.0.2",
     "eslint": "^9.18.0",
@@ -66,6 +74,7 @@
   "allowScripts": {
     "esbuild@0.28.2": true,
     "prisma@7.9.1": true,
-    "@prisma/engines@7.9.1": true
+    "@prisma/engines@7.9.1": true,
+    "argon2@0.45.1": true
   }
 }

@@ -2,7 +2,7 @@ import { disconnectDatabase, prisma } from '@/db/prisma';
 import { seedCatalogues } from './seeds/catalogues';
 import { seedEntitlements } from './seeds/entitlements';
 import { seedProducts } from './seeds/products';
-import { seedUsers } from './seeds/users';
+import { DEV_PASSWORD, seedUsers } from './seeds/users';
 import { seedVenues } from './seeds/venues';
 
 /**
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`\nDone in ${elapsed}s.`);
-  console.log('Dev users have no password hash — argon2 arrives in Batch 2.');
+  console.log(`\nSign in as any dev user, e.g. sarah.dev@kinvo.test / ${DEV_PASSWORD}`);
 }
 
 main()

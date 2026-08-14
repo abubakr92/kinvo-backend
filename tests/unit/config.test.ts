@@ -1,16 +1,28 @@
 import { EnvValidationError, env, isTest, parseEnv } from '@config/env';
 
 const VALID: NodeJS.ProcessEnv = {
-  NODE_ENV: 'production',
+  // Not 'production': that path additionally demands Twilio, Google, and Apple
+  // credentials, which is asserted separately below.
+  NODE_ENV: 'development',
   DATABASE_URL: 'postgresql://kinvo:kinvo@localhost:5432/kinvo',
   REDIS_URL: 'redis://localhost:6379',
+  JWT_ACCESS_SECRET: 'a-sufficiently-long-access-secret-for-tests-0001',
+  JWT_REFRESH_SECRET: 'a-sufficiently-long-refresh-secret-for-tests-002',
+};
+
+const PRODUCTION_CREDENTIALS: NodeJS.ProcessEnv = {
+  TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+  TWILIO_AUTH_TOKEN: 'auth-token',
+  TWILIO_VERIFY_SERVICE_SID: 'VA00000000000000000000000000000000',
+  GOOGLE_OAUTH_CLIENT_IDS: 'client-id.apps.googleusercontent.com',
+  APPLE_CLIENT_IDS: 'com.kinvo.app',
 };
 
 describe('environment validation (spec 7, Batch 0)', () => {
   it('parses a minimal valid environment', () => {
     const parsed = parseEnv(VALID);
 
-    expect(parsed.NODE_ENV).toBe('production');
+    expect(parsed.NODE_ENV).toBe('development');
     expect(parsed.DATABASE_URL).toBe('postgresql://kinvo:kinvo@localhost:5432/kinvo');
   });
 
@@ -25,19 +37,84 @@ describe('environment validation (spec 7, Batch 0)', () => {
   });
 
   it('crashes rather than booting half-configured when a required var is missing', () => {
-    expect(() => parseEnv({ NODE_ENV: 'production' })).toThrow(EnvValidationError);
+    expect(() => parseEnv({ NODE_ENV: 'development' })).toThrow(EnvValidationError);
   });
 
   it('names every offending variable in the failure', () => {
     try {
-      parseEnv({ NODE_ENV: 'production' });
+      parseEnv({ NODE_ENV: 'development' });
       throw new Error('expected parseEnv to throw');
     } catch (error) {
       expect(error).toBeInstanceOf(EnvValidationError);
       const issues = (error as EnvValidationError).issues;
-      expect(Object.keys(issues).sort()).toEqual(['DATABASE_URL', 'REDIS_URL']);
+      expect(Object.keys(issues).sort()).toEqual([
+        'DATABASE_URL',
+        'JWT_ACCESS_SECRET',
+        'JWT_REFRESH_SECRET',
+        'REDIS_URL',
+      ]);
       expect((error as EnvValidationError).message).toContain('DATABASE_URL');
     }
+  });
+
+  it('refuses a signing secret short enough to brute force', () => {
+    expect(() => parseEnv({ ...VALID, JWT_ACCESS_SECRET: 'too-short' })).toThrow(
+      EnvValidationError,
+    );
+    expect(() => parseEnv({ ...VALID, JWT_REFRESH_SECRET: 'also-short' })).toThrow(
+      EnvValidationError,
+    );
+  });
+
+  it('gives signing secrets no default value', () => {
+    // A secret with a fallback is not a secret. If this ever passes with the
+    // keys absent, someone has added a default and every token is forgeable.
+    const withoutSecrets = { ...VALID };
+    delete withoutSecrets.JWT_ACCESS_SECRET;
+    delete withoutSecrets.JWT_REFRESH_SECRET;
+
+    expect(() => parseEnv(withoutSecrets)).toThrow(EnvValidationError);
+  });
+
+  it('demands third-party credentials in production but not in development', () => {
+    // Development boots without them — OTP and social sign-in are simply
+    // unavailable, which is fine locally.
+    expect(() => parseEnv({ ...VALID, NODE_ENV: 'development' })).not.toThrow();
+
+    // Production must not start only to fail on the first real request.
+    expect(() => parseEnv({ ...VALID, NODE_ENV: 'production' })).toThrow(EnvValidationError);
+
+    expect(() =>
+      parseEnv({ ...VALID, ...PRODUCTION_CREDENTIALS, NODE_ENV: 'production' }),
+    ).not.toThrow();
+  });
+
+  it('names which production credential is missing', () => {
+    const partial: NodeJS.ProcessEnv = {
+      ...VALID,
+      ...PRODUCTION_CREDENTIALS,
+      NODE_ENV: 'production',
+    };
+    delete partial.TWILIO_AUTH_TOKEN;
+
+    try {
+      parseEnv(partial);
+      throw new Error('expected parseEnv to throw');
+    } catch (error) {
+      expect((error as EnvValidationError).issues).toHaveProperty('TWILIO_AUTH_TOKEN');
+    }
+  });
+
+  it('splits comma-separated social client IDs', () => {
+    const parsed = parseEnv({
+      ...VALID,
+      GOOGLE_OAUTH_CLIENT_IDS: 'ios.apps.googleusercontent.com, web.apps.googleusercontent.com',
+    });
+
+    expect(parsed.GOOGLE_OAUTH_CLIENT_IDS).toEqual([
+      'ios.apps.googleusercontent.com',
+      'web.apps.googleusercontent.com',
+    ]);
   });
 
   it('rejects a DATABASE_URL that is not a postgres connection string', () => {

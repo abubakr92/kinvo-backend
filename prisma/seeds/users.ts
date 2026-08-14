@@ -10,6 +10,7 @@ import {
   prisma,
 } from '@/db/prisma';
 import { setProfileLocation, type Coordinates } from '@/db/geo';
+import { hashPassword } from '@modules/auth/password.service';
 
 /**
  * ~30 development users spread across modes and locations (spec §7, Batch 1).
@@ -20,10 +21,11 @@ import { setProfileLocation, type Coordinates } from '@/db/geo';
  * These are NOT test fixtures. Tests seed and clean their own data (spec §0.4);
  * see tests/helpers/factories.ts.
  *
- * No password hashes are set. argon2 arrives in Batch 2, and inventing a hash
- * format now would have to be undone then. Dev users exist to populate decks,
- * not to sign in.
+ * Every dev user shares one obvious password so the mobile team can sign in
+ * against staging. Safe because these accounts only ever exist in seeded
+ * development and staging databases — the seed is never run against production.
  */
+export const DEV_PASSWORD = 'kinvo-dev-password';
 
 const LONDON: Record<string, Coordinates> = {
   westminster: { longitude: -0.1276, latitude: 51.5072 },
@@ -415,6 +417,10 @@ function pick<T>(values: T[], index: number): T {
 }
 
 export async function seedUsers(): Promise<{ users: number; profiles: number }> {
+  // Hashed once and reused: argon2 is deliberately slow, and hashing the same
+  // string thirty times would add several seconds to every seed run.
+  const passwordHash = await hashPassword(DEV_PASSWORD);
+
   const interestRecords = await prisma.interest.findMany();
   const interestsBySlug = new Map(interestRecords.map((i) => [i.slug, i.id]));
 
@@ -441,8 +447,16 @@ export async function seedUsers(): Promise<{ users: number; profiles: number }> 
   for (const [index, seed] of USERS.entries()) {
     const existingIdentity = await prisma.authIdentity.findUnique({
       where: { provider_identifier: { provider: 'email', identifier: seed.email } },
-      select: { user_id: true },
+      select: { id: true, user_id: true },
     });
+
+    if (existingIdentity) {
+      // Re-seeding an older database: these rows predate password hashing.
+      await prisma.authIdentity.update({
+        where: { id: existingIdentity.id },
+        data: { password_hash: passwordHash },
+      });
+    }
 
     const user = existingIdentity
       ? await prisma.user.update({
@@ -466,9 +480,7 @@ export async function seedUsers(): Promise<{ users: number; profiles: number }> 
               create: {
                 provider: 'email',
                 identifier: seed.email,
-                // Hashing arrives with argon2 in Batch 2. Dev users populate
-                // decks; they are not sign-in credentials.
-                password_hash: null,
+                password_hash: passwordHash,
                 verified_at: new Date(),
               },
             },

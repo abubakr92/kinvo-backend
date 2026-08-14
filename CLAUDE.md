@@ -136,6 +136,14 @@ Path aliases: `@/*`, `@config/*`, `@middleware/*`, `@modules/*`, `@utils/*`. Dec
 
 **Auth.** Bearer tokens in the `Authorization` header, returned in the response body — not cookies. Access 30 min, refresh 60 days, rotated on every use. A replayed refresh token revokes the whole family. Keep `AUTH_REQUIRED`, `AUTH_TOKEN_EXPIRED`, and `AUTH_TOKEN_INVALID` distinct — the app does something different for each.
 
+Mount `authenticate` on anything needing a user, then `requireOnboarded` on **every** discovery, matching, and chat route. That second gate is what keeps accounts created by social or phone sign-in — which have no date of birth yet — out of the product until onboarding runs the under-18 check. Omitting it is a legal problem, not a UX one.
+
+`date_of_birth` is nullable because Google, Apple, and Twilio do not supply one. Call `assertAdult()` from `@utils/age` **wherever** a date of birth is set, never only at registration.
+
+Never widen `req.user` from a token claim. `authenticate` loads the user on every request so suspension and deletion take effect immediately rather than whenever the 30-minute token happens to expire.
+
+**Secrets in tests.** Rate limits are off by default under test and switched on by the suite that asserts them. External HTTP — Twilio, Google, Apple — is mocked at the provider boundary in `src/providers/`; nothing below that line is faked.
+
 **Quota vs rate limit.** Infrastructure protection → `429 RATE_LIMITED`. Business limits that sell subscriptions → `422 QUOTA_EXCEEDED` with paywall context. Conflating them hides the paywall and costs revenue.
 
 **Blocks (spec 5.5).** Blocks beat everything. Enforce via a **single shared exclusion clause** reused by every query — never re-implemented per endpoint. Return `404`, not `403`, when a block is the reason; a 403 confirms the resource exists.

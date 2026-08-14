@@ -36,6 +36,18 @@ Roles below: **PO** = product owner (Abubakr). **Eng** = the implementing agent.
 | —   | **Never use AWS root credentials.** An IAM user with scoped permissions, MFA on root, and a billing alert are prerequisites for any deployment work. | 2026-08-13 | PO  | The client supplied root credentials. Root cannot be permission-limited and can close the account. PO is creating the IAM user.                                                                                                     |
 | —   | **Deploy staging after Batch 3**, not at Batch 15.                                                                                                   | 2026-08-13 | Eng | After Batch 3 the mobile team has auth, profiles, and onboarding — enough to build against. Deploying later blocks them for months, then surfaces every integration problem at once.                                                |
 
+### 1.2b Resolved during Batch 2 (auth)
+
+| Decision                                                                                                                             | Date       | By  | Reasoning                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ---------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`users.date_of_birth` is nullable.** The under-18 rejection fires whenever a date of birth is set, not only at email registration. | 2026-08-14 | PO  | Google, Apple, and Twilio supply no date of birth, so a social or phone signup cannot know a user's age at account creation. A user without one stays `pending` and is blocked from discovery, matching, and chat, so nobody under 18 reaches the product — which is what spec §5.1 actually protects.           |
+| **A new phone number creates a pending account** rather than being refused.                                                          | 2026-08-14 | PO  | Same reasoning. Consistent with social signup, and `requireOnboarded` is the single gate for both.                                                                                                                                                                                                               |
+| **Libraries added:** `argon2`, `jsonwebtoken`, `twilio`, `google-auth-library`, `express-rate-limit`, `rate-limit-redis`, `ioredis`. | 2026-08-14 | PO  | PO delegated the choice. The first three are named in spec §2; the rest cover Google ID-token verification and the rate limiting §4.9 requires.                                                                                                                                                                  |
+| **Apple ID tokens are verified with no JWKS library** — Node's `createPublicKey` plus `jsonwebtoken`.                                | 2026-08-14 | Eng | `jose` was planned and approved, but it is ESM-only and the CommonJS test runner cannot load it; `jwks-rsa` depends on it and fails the same way. Apple's JWKS is a small JSON document and Node imports a JWK natively, so this removed a dependency instead of adding one. **Deviates from what PO approved.** |
+| **Rate limits are disabled under test** via a test-only switch, and enabled by the suite that asserts them.                          | 2026-08-14 | Eng | A suite makes far more requests from one address than any real client, so limits would fail unrelated tests. The switch throws if called outside tests.                                                                                                                                                          |
+| **`X-RateLimit-*` legacy headers stay on.** The draft-7 `RateLimit` header is emitted alongside.                                     | 2026-08-14 | Eng | Spec §4.9 names `X-RateLimit-*` explicitly, so those are the client contract the Flutter app reads.                                                                                                                                                                                                              |
+| **Dev seed users share the password `kinvo-dev-password`.**                                                                          | 2026-08-14 | Eng | The mobile team needs sign-in-able accounts on staging. Safe because the seed only ever runs against development and staging databases.                                                                                                                                                                          |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -170,6 +182,15 @@ Newest last. Every entry is something that changed the repository or the machine
 - **Verified:** 111 tests passing, 92.12% line coverage · `npm test` bootstraps a dropped-and-recreated `kinvo_test` from nothing · typecheck, lint, format, and build all clean.
 - Two Windows-specific problems found and fixed in `tests/globalSetup.ts`: Node refuses to spawn `npx.cmd` without a shell (EINVAL, post-CVE-2024-27980), and passing args through a shell does not escape them (DEP0190). Resolved by running the Prisma CLI's JavaScript with `process.execPath`, which also works unchanged on Linux for CI.
 
+### 2026-08-14 — Batch 2: Auth
+
+- Twelve endpoints: register, login, refresh, logout, forgot/reset/change password, OTP send and verify, Google, Apple, and `GET /auth/me`.
+- Middleware every later batch depends on: `authenticate`, `optionalAuth`, `requireOnboarded`, `requireRole`, plus Redis-backed rate limiting.
+- Migration `20260813204346_nullable_date_of_birth`. **Prisma generated four `DROP INDEX` statements for the PostGIS GIST indexes** — exactly the fragility flagged in the Batch 1 report, arriving on the very next migration. Removed by hand; the migration now carries a warning block. The GIST assertion in `postgis.test.ts` is the backstop and would have caught it.
+- **Verified:** 274 tests passing, 87.21% line and 86.56% function coverage · typecheck, lint, format, and build clean · seed still runs and is still idempotent · GIST indexes survived the migration.
+- **Verified end to end against the running build**, not only through Supertest: login → `/auth/me` → refresh → replay rejected 401 → wrong password rejected 401.
+- `jose` was installed, then removed: ESM-only, unloadable by the CommonJS test runner. `jwks-rsa` was tried next and failed identically because it depends on `jose`. Apple verification ended up needing no library at all.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -178,8 +199,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | ----- | --------------------------- | ------ | ------------------------------------------------------------ | ------------------------------ |
 | 0     | Foundation                  | ✅     | Node 24, npm                                                 | —                              |
 | 1     | Database schema             | ✅     | **Docker** (Postgres + PostGIS, Redis)                       | — (#2/#3 seeded provisionally) |
-| 2     | Auth                        | ▶      | Docker. Twilio Verify (mocked in tests)                      | —                              |
-| 3     | Users, profiles, onboarding | ⬜     | Docker                                                       | —                              |
+| 2     | Auth                        | ✅     | Docker. Twilio Verify (mocked in tests)                      | —                              |
+| 3     | Users, profiles, onboarding | ▶      | Docker                                                       | —                              |
 | **—** | **Deployment interlude**    | ⬜     | **AWS account + IAM user, AWS CLI, Terraform, domain name**  | —                              |
 | 4     | Media and verification      | ⬜     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |
 | 5     | Modes and settings          | ⬜     | Docker                                                       | **#9**                         |

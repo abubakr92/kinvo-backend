@@ -21,6 +21,11 @@ process.env.LOG_LEVEL = 'silent';
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? 'postgresql://kinvo:kinvo@localhost:5433/kinvo_test';
 
+// Fixed, obviously-fake signing keys. Tests must be deterministic, and a random
+// secret per run would make a token minted in one suite unverifiable in another.
+process.env.JWT_ACCESS_SECRET ??= 'test-access-secret-not-for-any-real-deployment-0001';
+process.env.JWT_REFRESH_SECRET ??= 'test-refresh-secret-not-for-any-real-deployment-002';
+
 process.env.PORT ??= '3001';
 process.env.HOST ??= '127.0.0.1';
 process.env.CORS_ORIGINS ??= '*';
