@@ -225,6 +225,7 @@ enum PaymentSource {
 /// everything else. Verification documents live in a separate, stricter bucket
 /// (spec §7, Batch 4) — they are the most sensitive data in the system.
 enum MediaKind {
+  profile_photo
   chat_image
   chat_video
   voice_note
@@ -709,6 +710,15 @@ model MediaAsset {
   height      Int?
 
   moderation_status ModerationStatus @default(pending)
+
+  /// Set once storage confirms the bytes actually arrived (spec §4.8).
+  ///
+  /// An upload is a two-step handshake: we issue a presigned URL and record the
+  /// intent, the client PUTs directly to storage, then we HEAD the object to
+  /// see what really landed. Until this is set the row is an intent, not an
+  /// asset, and nothing may reference it — the client saying "done" is a claim,
+  /// not evidence.
+  uploaded_at DateTime?
 
   created_at DateTime  @default(now())
   deleted_at DateTime?

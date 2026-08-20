@@ -31,3 +31,15 @@ process.env.HOST ??= '127.0.0.1';
 process.env.CORS_ORIGINS ??= '*';
 process.env.JSON_BODY_LIMIT ??= '1mb';
 process.env.REDIS_URL ??= 'redis://localhost:6380';
+
+/**
+ * Media storage. Tests run against the MinIO container from docker-compose, not
+ * a fake — the presigning, the direct PUT, and the private-bucket policy are all
+ * exercised for real (spec §0.4 mocks external HTTP only, and this is ours).
+ */
+process.env.S3_ENDPOINT ??= 'http://localhost:9100';
+process.env.S3_FORCE_PATH_STYLE ??= 'true';
+process.env.S3_ACCESS_KEY_ID ??= 'kinvo';
+process.env.S3_SECRET_ACCESS_KEY ??= 'kinvo-dev-secret';
+process.env.S3_MEDIA_BUCKET ??= 'kinvo-media';
+process.env.S3_VERIFICATION_BUCKET ??= 'kinvo-verification';

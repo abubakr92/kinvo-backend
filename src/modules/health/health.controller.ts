@@ -4,6 +4,7 @@ import { API_VERSION } from '@config/constants';
 import { env } from '@config/env';
 import { isDatabaseReachable } from '@/db/prisma';
 import { isRedisReachable } from '@/db/redis';
+import { isStorageReachable } from '@/providers/s3.provider';
 import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
 import { sendSuccess } from '@utils/response';
@@ -40,13 +41,17 @@ export function getHealth(_req: Request, res: Response): void {
  * code rather than having to parse the body.
  */
 export async function getReadiness(_req: Request, res: Response): Promise<void> {
-  const [database, redis] = await Promise.all([isDatabaseReachable(), isRedisReachable()]);
+  const [database, redis, storage] = await Promise.all([
+    isDatabaseReachable(),
+    isRedisReachable(),
+    isStorageReachable(),
+  ]);
 
-  if (!database || !redis) {
+  if (!database || !redis || !storage) {
     throw new ApiError(
       ERROR_CODES.SERVICE_UNAVAILABLE,
       'This service is temporarily unavailable.',
-      { database, redis },
+      { database, redis, storage },
     );
   }
 
@@ -54,6 +59,9 @@ export async function getReadiness(_req: Request, res: Response): Promise<void> 
     status: 'ready',
     database,
     redis,
+    // Added in Batch 4: with photos on every deck card, unreachable storage is
+    // as fatal to the product as an unreachable database.
+    storage,
     checked_at: new Date().toISOString(),
   });
 }

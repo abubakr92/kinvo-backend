@@ -5,6 +5,7 @@ import { closeDatabase, resetDatabase } from '../../helpers/db';
 import { authHeader, createAuthenticatedUser } from '../../helpers/auth';
 import { api, expectErrorEnvelope, expectSuccessEnvelope } from '../../helpers/request';
 import { LONDON } from '../../helpers/factories';
+import { addPhoto } from '../../helpers/media';
 
 const USERS = `${API_PREFIX}/users`;
 
@@ -372,6 +373,10 @@ describe('profile completion percentage', () => {
       .put(`${USERS}/me/prompts`)
       .set(authHeader(tokens))
       .send({ prompts: [{ slug: 'weekend', answer: 'A long walk.' }] });
+    // Batch 4 added a photo criterion. Because the score is normalised over
+    // whatever criteria exist, adding one re-weighted the rest rather than
+    // capping the achievable total — but 100 now genuinely requires a photo.
+    await addPhoto(tokens);
 
     const response = await api.get(`${USERS}/me`).set(authHeader(tokens));
     expect(response.body.data.completion_percentage).toBe(100);

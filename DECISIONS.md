@@ -221,6 +221,23 @@ Accepted risks, recorded rather than fixed:
 - **Two production bugs found while fixing a hanging test.** `server.ts` never opened or closed its Postgres and Redis connections: a bad connection string became a 500 on a user's first request instead of a failure at deploy time, and shutdown severed in-flight queries and leaked pool connections. Now connects before accepting traffic and disconnects after the HTTP server drains.
 - **Verified:** all Batch 3 suites green.
 
+### 2026-08-20 — Batch 4: Media and verification
+
+AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This is not a stubbed storage layer: the application uses the real `@aws-sdk/client-s3`, issues real presigned URLs, and the buckets are genuinely private. Moving to AWS is a change of endpoint and credentials in `.env` with no code change.
+
+- Two buckets, kept apart deliberately: `kinvo-media` for photos, chat media, and voice notes; `kinvo-verification` for government ID images and report evidence, with a much shorter presigned-URL lifetime (spec §7 Batch 4).
+- Uploads are a two-step handshake — presign, client PUTs directly to storage, then the server HEADs the object and records what actually landed. An asset without `uploaded_at` may never be attached to anything.
+- Migration `media_upload_ledger`: added `profile_photo` to the media kinds and `uploaded_at` to media assets. **Prisma emitted the four PostGIS `DROP INDEX` statements again** — the second occurrence, exactly as the previous migration's warning predicted. Removed by hand; the GIST assertion in `postgis.test.ts` remains the backstop.
+- Migration `photo_reorder_staging_band`: the Batch 1 CHECK constraint allowed positions 0–5 only, which made reordering impossible. Reordering has to park photos at temporary positions inside one transaction, because the partial unique index on `(profile_id, position)` rejects any sequence passing through a duplicate. The CHECK now permits −6…5, where negatives exist only between the two phases of a single transaction.
+- **Bug found by a test, not in review:** the first reorder attempt promoted the new first photo before demoting the old primary, tripping the one-primary-per-profile partial unique index. Phase one now clears every primary flag as well as parking positions.
+- Broke a genuine import cycle: `profiles.service` needed photos for the primary photo URL while `photos.service` needed `ensureProfile`. Moved `ensureProfile` into `profiles/profile.repository.ts`. The cycle resolved at runtime under CommonJS, but only by accident of module ordering.
+- Onboarding now requires at least one approved photo, and profile completion scores photos — both as planned in Batch 3. Because completion is normalised over whatever criteria exist, adding one re-weighted the rest automatically.
+- Readiness (`/health/ready`) now probes storage alongside Postgres and Redis: with photos on every deck card, unreachable storage is as fatal as an unreachable database.
+
+**`MEDIA_AUTO_APPROVE_UPLOADS` — a temporary switch, recorded so it is not forgotten.** spec §4.8 keeps pending media visible to its owner alone, but nothing moves a photo from pending to approved until the moderation pipeline lands in Batch 10. Without a switch, no uploaded photo would be visible to anyone and no deck card would ever render. It defaults on for development and staging and is **forced off in production** by env validation — the same shape as the Twilio dev stub. **Batch 10 must delete it.**
+
+**Still open, unchanged:** whether profile photo URLs move to CDN signed URLs instead of expiring presigned GETs, and whether media bytes move to Cloudflare R2 (identical API, no egress charges — which matters most for a photo-heavy app). Presigned GETs are correct for now; both remain decisions for the deployment.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -232,8 +249,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 2     | Auth                        | ✅     | Docker. Twilio Verify (mocked in tests)                      | —                              |
 | 3     | Users, profiles, onboarding | ✅     | Docker                                                       | —                              |
 | **—** | **Deployment interlude**    | ⬜     | **AWS account + IAM user, AWS CLI, Terraform, domain name**  | —                              |
-| 4     | Media and verification      | ⬜     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |
-| 5     | Modes and settings          | ⬜     | Docker                                                       | **#9**                         |
+| 4     | Media and verification      | ✅     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |
+| 5     | Modes and settings          | ▶      | Docker                                                       | **#9**                         |
 | 6     | Entitlements (stub)         | ⬜     | Redis                                                        | —                              |
 | 7     | Discovery and matching      | ⬜     | Redis + BullMQ                                               | **#6, #7, #10**                |
 | 8     | Matches and chat REST       | ⬜     | Docker                                                       | #7; block visibility           |

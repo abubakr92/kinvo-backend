@@ -83,6 +83,70 @@ export const envSchema = z.object({
         .map((id) => id.trim())
         .filter((id) => id.length > 0),
     ),
+
+  // --- Media storage (Batch 4) --------------------------------------------
+  // S3 in every environment. Locally that S3 is MinIO, which speaks the same
+  // API, so only the endpoint and credentials differ between here and AWS.
+  S3_REGION: z.string().min(1).default('us-east-1'),
+
+  /**
+   * Set for MinIO, unset for real AWS S3 (the SDK then resolves the regional
+   * endpoint itself).
+   */
+  S3_ENDPOINT: z.string().url().optional(),
+
+  /**
+   * MinIO addresses buckets as a path (host/bucket/key); AWS uses a virtual
+   * host (bucket.host/key). Must be true against MinIO.
+   */
+  S3_FORCE_PATH_STYLE: z
+    .string()
+    .default('false')
+    .transform((value) => value === 'true'),
+
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+
+  /** Profile photos, chat media, and voice notes. */
+  S3_MEDIA_BUCKET: z.string().min(1).default('kinvo-media'),
+
+  /**
+   * spec §7 Batch 4: verification documents live in a SEPARATE private bucket
+   * with stricter lifecycle rules. Government ID images are the most sensitive
+   * data in this system and must never share a bucket policy with selfies.
+   */
+  S3_VERIFICATION_BUCKET: z.string().min(1).default('kinvo-verification'),
+
+  /** Lifetime of a presigned upload URL. Short: it is used immediately. */
+  S3_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+
+  /**
+   * Lifetime of a presigned download URL. Longer, because the client caches
+   * images — but still finite, so a leaked URL expires. Replaced by CDN signed
+   * URLs if a CDN is adopted (open decision, recorded in DECISIONS.md).
+   */
+  S3_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(604800).default(3600),
+
+  /** Verification documents get a much shorter window than profile photos. */
+  S3_VERIFICATION_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+
+  /**
+   * Approve uploaded media on arrival instead of leaving it pending.
+   *
+   * spec §4.8 says media pending moderation is visible to its owner and nobody
+   * else — correct, but nothing moves a photo from pending to approved until
+   * the moderation pipeline arrives in Batch 10. Without this switch every
+   * uploaded photo would be invisible to everyone, and no deck card would ever
+   * render an image.
+   *
+   * So it defaults on for development and staging and is FORCED OFF in
+   * production by the refinement below, the same shape as the Twilio dev stub:
+   * useful locally, impossible to ship. Batch 10 removes it entirely.
+   */
+  MEDIA_AUTO_APPROVE_UPLOADS: z
+    .string()
+    .default('true')
+    .transform((value) => value === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -110,6 +174,8 @@ export class EnvValidationError extends Error {
  * the first real request instead of at deploy time.
  */
 const PRODUCTION_REQUIRED: { key: keyof Env; message: string }[] = [
+  { key: 'S3_ACCESS_KEY_ID', message: 'required in production for media storage' },
+  { key: 'S3_SECRET_ACCESS_KEY', message: 'required in production for media storage' },
   { key: 'TWILIO_ACCOUNT_SID', message: 'required in production for OTP delivery' },
   { key: 'TWILIO_AUTH_TOKEN', message: 'required in production for OTP delivery' },
   { key: 'TWILIO_VERIFY_SERVICE_SID', message: 'required in production for OTP delivery' },
@@ -159,6 +225,13 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     // web console arrives later and this is the moment to refuse it.
     if (result.data.CORS_ORIGINS.includes('*')) {
       issues.CORS_ORIGINS = ['must list explicit origins in production, not "*"'];
+    }
+
+    // Shipping unmoderated user photos is a safety incident waiting to happen.
+    if (result.data.MEDIA_AUTO_APPROVE_UPLOADS) {
+      issues.MEDIA_AUTO_APPROVE_UPLOADS = [
+        'must be false in production — media cannot bypass moderation',
+      ];
     }
   }
 

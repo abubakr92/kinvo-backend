@@ -4,6 +4,7 @@ import { closeDatabase, resetDatabase } from '../../helpers/db';
 import { authHeader, createAuthenticatedUser } from '../../helpers/auth';
 import { api, expectErrorEnvelope } from '../../helpers/request';
 import { LONDON, adultDateOfBirth } from '../../helpers/factories';
+import { addPhoto } from '../../helpers/media';
 
 /**
  * spec §5.1: onboarding is a state machine, `pending -> active`, and only
@@ -41,6 +42,9 @@ async function satisfyRequirements(tokens: {
     .put(`${USERS}/me/interests`)
     .set(auth)
     .send({ interests: ['music'] });
+  // Batch 4 added "at least one approved photo" to the checklist. A deck full
+  // of blank cards is not a product, so this is a real requirement.
+  await addPhoto(tokens);
 }
 
 describe('GET /onboarding', () => {
@@ -58,9 +62,10 @@ describe('GET /onboarding', () => {
       'bio',
       'location',
       'interests',
+      'photo',
     ]);
     expect(response.body.data.missing).toEqual(
-      expect.arrayContaining(['bio', 'location', 'interests']),
+      expect.arrayContaining(['bio', 'location', 'interests', 'photo']),
     );
   });
 
@@ -101,7 +106,7 @@ describe('POST /onboarding/complete', () => {
     expect(response.status).toBe(403);
     expectErrorEnvelope(response.body, 'ONBOARDING_INCOMPLETE');
     expect(response.body.error.details.missing).toEqual(
-      expect.arrayContaining(['bio', 'location', 'interests']),
+      expect.arrayContaining(['bio', 'location', 'interests', 'photo']),
     );
   });
 

@@ -59,7 +59,7 @@ Do not substitute a library without asking.
 npm install
 cp .env.example .env
 
-npm run db:up          # docker compose up -d  (postgres + redis)
+npm run db:up          # docker compose up -d  (postgres + redis + minio)
 npm run db:deploy      # apply committed migrations
 npm run db:seed        # idempotent development data
 npm run db:reset       # drop, re-migrate, re-seed
@@ -166,6 +166,12 @@ Return `404`, not `403`, when a block is the reason; a 403 confirms the resource
 **PostGIS.** Prisma cannot read or write a `geography` column; those fields are `Unsupported()` in the schema. Every spatial query lives in `src/db/geo.ts` and nowhere else. Coordinate order is `(longitude, latitude)` — `ST_MakePoint` takes X then Y. Distances are always metres.
 
 **Migrations.** GIST indexes, CHECK constraints, and partial unique indexes cannot be expressed in `schema.prisma` and are hand-written at the bottom of the migration SQL. **If you regenerate a migration, re-apply them.**
+
+**Media.** Uploads are a two-step handshake: the API issues a presigned PUT, the client uploads straight to storage, then the API HEADs the object to record what actually landed. An asset with no `uploaded_at` is an intent, not an asset, and may never be attached to anything — the client saying "done" is a claim, not evidence.
+
+Both buckets are private, so every media URL is presigned and time-limited, minted on read. `S3_MEDIA_BUCKET` holds photos, chat media, and voice notes; `S3_VERIFICATION_BUCKET` holds government ID images and report evidence, with a much shorter URL lifetime. **Never merge them.** Locally both live in MinIO (docker-compose), which speaks the S3 API — the SDK and the presigning are real, only the endpoint differs from AWS.
+
+`claimAsset()` is how anything attaches media. It checks ownership, completion, and kind together, so a verification document can never be promoted into the public photo table.
 
 **Secrets.** Environment only, validated at boot. Never in code.
 

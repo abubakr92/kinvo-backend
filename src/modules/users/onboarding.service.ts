@@ -1,5 +1,5 @@
 import { UserStatus, prisma } from '@/db/prisma';
-import { getProfileFacts } from '@modules/profiles/profiles.service';
+import { getProfileFacts } from '@modules/profiles/completion.service';
 import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
 import { assertAdult } from '@utils/age';
@@ -72,7 +72,13 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
       label: 'Pick at least one interest',
       is_complete: facts.interest_count >= 1,
     },
-    // Batch 4 adds: at least one approved photo.
+    {
+      key: 'photo',
+      label: 'Add a photo',
+      // Added in Batch 4, as planned. A deck full of blank cards is not a
+      // product, so this is a real requirement rather than a nicety.
+      is_complete: facts.approved_photo_count >= 1,
+    },
     // Batch 5 adds: at least one enabled mode.
   ];
 

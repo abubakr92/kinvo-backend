@@ -5,10 +5,11 @@ import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
 import { calculateAge } from '@utils/age';
 import { toUserCompact } from '@utils/compact';
+import { getPrimaryPhotoUrlFor } from '@modules/media/photos.service';
+import { ensureProfile } from './profile.repository';
+import { getProfileFacts, refreshCompletion, scoreCompletion } from './completion.service';
 import type {
-  CompletionCriterion,
   OwnProfile,
-  ProfileCompletion,
   ProfileInterestItem,
   ProfilePromptItem,
   PublicProfile,
@@ -27,93 +28,14 @@ const FULL_PROFILE_INCLUDE = {
   answers: { include: { question: true }, orderBy: { position: 'asc' } },
 } as const;
 
-/** Ensures a profile row exists. Social and phone signups create the user only. */
-export async function ensureProfile(userId: string): Promise<string> {
-  const existing = await prisma.profile.findUnique({
-    where: { user_id: userId },
-    select: { id: true },
-  });
+// Scoring lives in completion.service so photos.service can recompute after an
+// upload without importing this module, which would close an import cycle.
+export { getProfileFacts, refreshCompletion, scoreCompletion };
 
-  if (existing) {
-    return existing.id;
-  }
-
-  const created = await prisma.profile.create({
-    data: { user_id: userId },
-    select: { id: true },
-  });
-
-  return created.id;
-}
-
-// ---------------------------------------------------------------------------
-// Completion scoring
-// ---------------------------------------------------------------------------
-
-interface CompletionInput {
-  bio: string | null;
-  job_title: string | null;
-  organisation: string | null;
-  education: string | null;
-  has_location: boolean;
-  lifestyle_set_count: number;
-  interest_count: number;
-  prompt_count: number;
-}
-
-/**
- * Weighted checklist rather than scattered conditionals.
- *
- * The percentage is normalised over the criteria that currently exist, so
- * Batch 4 adding "has at least one photo" re-weights everything automatically
- * instead of capping the achievable score below 100.
- */
-function buildCriteria(input: CompletionInput): CompletionCriterion[] {
-  return [
-    { key: 'bio', label: 'Write a bio', weight: 20, is_met: (input.bio?.length ?? 0) >= 20 },
-    {
-      key: 'interests',
-      label: 'Add at least three interests',
-      weight: 20,
-      is_met: input.interest_count >= 3,
-    },
-    {
-      key: 'prompts',
-      label: 'Answer at least one prompt',
-      weight: 20,
-      is_met: input.prompt_count >= 1,
-    },
-    { key: 'location', label: 'Set your location', weight: 15, is_met: input.has_location },
-    {
-      key: 'work',
-      label: 'Add your job or organisation',
-      weight: 10,
-      is_met: Boolean(input.job_title ?? input.organisation),
-    },
-    { key: 'education', label: 'Add your education', weight: 5, is_met: input.education !== null },
-    {
-      key: 'lifestyle',
-      label: 'Fill in your lifestyle',
-      weight: 10,
-      is_met: input.lifestyle_set_count >= 3,
-    },
-  ];
-}
-
-export function scoreCompletion(input: CompletionInput): ProfileCompletion {
-  const criteria = buildCriteria(input);
-
-  const total = criteria.reduce((sum, criterion) => sum + criterion.weight, 0);
-  const earned = criteria.reduce(
-    (sum, criterion) => sum + (criterion.is_met ? criterion.weight : 0),
-    0,
-  );
-
-  return {
-    percentage: total === 0 ? 0 : Math.round((earned / total) * 100),
-    criteria,
-  };
-}
+// Defined in profile.repository so photos.service can use it without importing
+// this module, which would close an import cycle. Re-exported so existing
+// callers are unaffected.
+export { ensureProfile };
 
 type ProfileWithRelations = Awaited<ReturnType<typeof loadProfile>>;
 
@@ -128,24 +50,6 @@ async function loadProfile(userId: string) {
   }
 
   return profile;
-}
-
-function countLifestyle(profile: {
-  drinking: unknown;
-  smoking: unknown;
-  exercise: unknown;
-  diet: unknown;
-  pets: unknown;
-  children: unknown;
-}): number {
-  return [
-    profile.drinking,
-    profile.smoking,
-    profile.exercise,
-    profile.diet,
-    profile.pets,
-    profile.children,
-  ].filter((value) => value !== null && value !== undefined).length;
 }
 
 function mapInterests(profile: ProfileWithRelations): ProfileInterestItem[] {
@@ -165,35 +69,6 @@ function mapPrompts(profile: ProfileWithRelations): ProfilePromptItem[] {
     answer: row.answer,
     position: row.position,
   }));
-}
-
-/**
- * Recomputes and persists the completion percentage.
- *
- * Stored rather than computed on read because Batch 7's deck ranking sorts on
- * it, and a per-row computation there would be a sequential scan.
- */
-export async function refreshCompletion(userId: string): Promise<number> {
-  const profile = await loadProfile(userId);
-  const coordinates = await getProfileCoordinates(profile.id);
-
-  const { percentage } = scoreCompletion({
-    bio: profile.bio,
-    job_title: profile.job_title,
-    organisation: profile.organisation,
-    education: profile.education,
-    has_location: coordinates !== null,
-    lifestyle_set_count: countLifestyle(profile),
-    interest_count: profile.interests.length,
-    prompt_count: profile.answers.length,
-  });
-
-  await prisma.profile.update({
-    where: { id: profile.id },
-    data: { completion_percentage: percentage },
-  });
-
-  return percentage;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +164,8 @@ export async function getPublicProfile(
     : null;
 
   return {
-    user: toUserCompact(target),
+    // Approved photos only — spec §4.8 keeps pending media owner-visible.
+    user: toUserCompact(target, await getPrimaryPhotoUrlFor(target.id)),
     bio: target.profile.bio,
     job_title: target.profile.job_title,
     organisation: target.profile.organisation,
@@ -480,44 +356,6 @@ export async function setPrompts(
 
   await refreshCompletion(userId);
   return getOwnProfile(userId);
-}
-
-/** Used by the onboarding checklist without loading the whole profile. */
-export async function getProfileFacts(userId: string): Promise<{
-  has_profile: boolean;
-  has_bio: boolean;
-  has_location: boolean;
-  interest_count: number;
-  prompt_count: number;
-}> {
-  const profile = await prisma.profile.findUnique({
-    where: { user_id: userId },
-    select: {
-      id: true,
-      bio: true,
-      _count: { select: { interests: true, answers: true } },
-    },
-  });
-
-  if (!profile) {
-    return {
-      has_profile: false,
-      has_bio: false,
-      has_location: false,
-      interest_count: 0,
-      prompt_count: 0,
-    };
-  }
-
-  const coordinates = await getProfileCoordinates(profile.id);
-
-  return {
-    has_profile: true,
-    has_bio: (profile.bio?.trim().length ?? 0) > 0,
-    has_location: coordinates !== null,
-    interest_count: profile._count.interests,
-    prompt_count: profile._count.answers,
-  };
 }
 
 export { ERROR_CODES };
