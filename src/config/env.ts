@@ -147,6 +147,22 @@ export const envSchema = z.object({
     .string()
     .default('true')
     .transform((value) => value === 'true'),
+
+  /**
+   * Whether Twilio, Google, and Apple credentials must be present in production.
+   *
+   * Defaults true, and must stay true anywhere real users sign in: without it,
+   * OTP and social sign-in fail at a user's first request rather than at deploy
+   * time, which is far harder to notice.
+   *
+   * A staging environment that legitimately has no such accounts yet sets this
+   * false. The endpoints then return SERVICE_UNAVAILABLE when called, which is
+   * honest, instead of the whole API refusing to boot.
+   */
+  REQUIRE_THIRD_PARTY_INTEGRATIONS: z
+    .string()
+    .default('true')
+    .transform((value) => value !== 'false'),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -173,9 +189,15 @@ export class EnvValidationError extends Error {
  * Booting production without them would mean OTP and social sign-in failing at
  * the first real request instead of at deploy time.
  */
+/**
+ * S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are deliberately NOT in this list.
+ *
+ * On AWS the instance supplies credentials through its IAM role, so there are
+ * no static keys to set — that is the better practice, and demanding them here
+ * would force a long-lived secret onto the box for no reason. The SDK resolves
+ * the role automatically; the variables exist only for MinIO locally.
+ */
 const PRODUCTION_REQUIRED: { key: keyof Env; message: string }[] = [
-  { key: 'S3_ACCESS_KEY_ID', message: 'required in production for media storage' },
-  { key: 'S3_SECRET_ACCESS_KEY', message: 'required in production for media storage' },
   { key: 'TWILIO_ACCOUNT_SID', message: 'required in production for OTP delivery' },
   { key: 'TWILIO_AUTH_TOKEN', message: 'required in production for OTP delivery' },
   { key: 'TWILIO_VERIFY_SERVICE_SID', message: 'required in production for OTP delivery' },
@@ -211,7 +233,7 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     issues.JWT_REFRESH_SECRET = ['must be different from JWT_ACCESS_SECRET'];
   }
 
-  if (result.data.NODE_ENV === 'production') {
+  if (result.data.NODE_ENV === 'production' && result.data.REQUIRE_THIRD_PARTY_INTEGRATIONS) {
     for (const { key, message } of PRODUCTION_REQUIRED) {
       const value = result.data[key];
       const isEmpty = value === undefined || (Array.isArray(value) ? value.length === 0 : false);
@@ -220,6 +242,9 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
       }
     }
 
+  }
+
+  if (result.data.NODE_ENV === 'production') {
     // A wildcard origin in production lets any site call the API from a
     // browser. Harmless while the only client is a mobile app, but the admin
     // web console arrives later and this is the moment to refuse it.

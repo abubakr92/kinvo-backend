@@ -15,9 +15,10 @@ set -euxo pipefail
 dnf update -y
 dnf install -y docker
 
-# Compose v2 as a Docker CLI plugin.
+# Compose v2 as a Docker CLI plugin. x86_64 to match the instance: the wrong
+# architecture here does not fail until the first compose command runs.
 mkdir -p /usr/local/lib/docker/cli-plugins
-curl -SL "https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-aarch64" \
+curl -SL "https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-x86_64" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
@@ -37,6 +38,14 @@ get_secret() {
     --query 'Parameter.Value' \
     --output text
 }
+
+# Tracing OFF before the secrets are read.
+#
+# `set -x` echoes every assignment, so with it on the JWT keys and the database
+# password are written in plaintext to /var/log/cloud-init-output.log — which
+# defeats the entire point of holding them in SSM SecureStrings. Everything
+# between here and the end of the env files runs untraced.
+set +x
 
 JWT_ACCESS_SECRET="$(get_secret jwt_access_secret)"
 JWT_REFRESH_SECRET="$(get_secret jwt_refresh_secret)"
@@ -70,6 +79,18 @@ S3_MEDIA_BUCKET=${media_bucket}
 S3_VERIFICATION_BUCKET=${verification_bucket}
 S3_FORCE_PATH_STYLE=false
 MEDIA_AUTO_APPROVE_UPLOADS=false
+
+# No Twilio, Google, or Apple accounts exist for this project yet. Without this
+# waiver the API refuses to boot in production mode, which is the correct
+# default — OTP and social sign-in failing at a user's first request is far
+# harder to notice than failing at deploy time.
+#
+# With it, those endpoints return SERVICE_UNAVAILABLE when called, which is
+# honest. MUST become true the moment real users can sign in.
+REQUIRE_THIRD_PARTY_INTEGRATIONS=false
+
+# No S3 keys. The instance role supplies credentials, so there is no long-lived
+# secret on the box at all.
 ENVFILE
 
 chmod 600 "$APP_DIR/.env"
@@ -81,6 +102,9 @@ POSTGRES_DB=kinvo
 DBENV
 
 chmod 600 "$APP_DIR/db.env"
+
+# Secrets are now only in root-owned 600 files. Safe to trace again.
+set -x
 
 # --- compose ---------------------------------------------------------------
 cat > "$APP_DIR/docker-compose.yml" <<'COMPOSE'
@@ -133,7 +157,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
       - caddyconfig:/config
-    depends_on: [api]
+    # Deliberately no depends_on. Caddy proxying a service that is not up yet
+    # returns 502 for a moment; making it depend on the API means Caddy cannot
+    # start at all before the first image exists, which is exactly the state a
+    # freshly created instance is in.
 
 volumes:
   pgdata:

@@ -146,15 +146,64 @@ describe('environment validation (spec 7, Batch 0)', () => {
     expect(() => parseEnv({ ...VALID, MEDIA_AUTO_APPROVE_UPLOADS: 'true' })).not.toThrow();
   });
 
-  it('demands S3 credentials in production', () => {
-    const partial: NodeJS.ProcessEnv = {
+  it('does NOT demand static S3 credentials in production', () => {
+    // On AWS the instance supplies credentials through its IAM role, so there
+    // are no static keys to set. Requiring them would force a long-lived secret
+    // onto the box to satisfy a check — the worse practice, mandated by us.
+    // The variables exist only for MinIO locally.
+    const withoutKeys: NodeJS.ProcessEnv = {
       ...VALID,
       ...PRODUCTION_CREDENTIALS,
       NODE_ENV: 'production',
     };
-    delete partial.S3_SECRET_ACCESS_KEY;
+    delete withoutKeys.S3_ACCESS_KEY_ID;
+    delete withoutKeys.S3_SECRET_ACCESS_KEY;
 
-    expect(() => parseEnv(partial)).toThrow(EnvValidationError);
+    expect(() => parseEnv(withoutKeys)).not.toThrow();
+  });
+
+  it('waives third-party credentials only when explicitly told to', () => {
+    // Production-safe on everything except the third-party accounts, so this
+    // test isolates the waiver rather than tripping over the other rules.
+    const noIntegrations: NodeJS.ProcessEnv = {
+      ...VALID,
+      NODE_ENV: 'production',
+      CORS_ORIGINS: 'https://admin.kinvo.app',
+      MEDIA_AUTO_APPROVE_UPLOADS: 'false',
+    };
+
+    // Default: production refuses to boot without them, so OTP and social
+    // sign-in fail at deploy time rather than at a user's first request.
+    expect(() => parseEnv(noIntegrations)).toThrow(EnvValidationError);
+
+    // A staging environment that genuinely has no such accounts yet opts out.
+    // The endpoints then return SERVICE_UNAVAILABLE when called, which is
+    // honest, rather than the whole API refusing to start.
+    expect(() =>
+      parseEnv({ ...noIntegrations, REQUIRE_THIRD_PARTY_INTEGRATIONS: 'false' }),
+    ).not.toThrow();
+  });
+
+  it('still enforces the security rules even when integrations are waived', () => {
+    // The waiver covers missing third-party accounts. It must not become a way
+    // to smuggle a wildcard CORS origin or unmoderated media into production.
+    const waived: NodeJS.ProcessEnv = {
+      ...VALID,
+      NODE_ENV: 'production',
+      REQUIRE_THIRD_PARTY_INTEGRATIONS: 'false',
+      CORS_ORIGINS: '*',
+    };
+
+    expect(() => parseEnv(waived)).toThrow(EnvValidationError);
+
+    expect(() =>
+      parseEnv({
+        ...VALID,
+        NODE_ENV: 'production',
+        REQUIRE_THIRD_PARTY_INTEGRATIONS: 'false',
+        MEDIA_AUTO_APPROVE_UPLOADS: 'true',
+      }),
+    ).toThrow(EnvValidationError);
   });
 
   it('splits comma-separated social client IDs', () => {

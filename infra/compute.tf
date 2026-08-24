@@ -62,9 +62,10 @@ resource "aws_iam_role_policy" "ssm_read" {
 # The instance
 # ---------------------------------------------------------------------------
 
-# Amazon Linux 2023, arm64 to match the Graviton instance type.
+# Amazon Linux 2023. The architecture here MUST match var.instance_type —
+# AWS refuses to launch on a mismatch, which is the good outcome.
 data "aws_ssm_parameter" "ami" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
 data "aws_region" "current" {}

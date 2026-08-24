@@ -27,7 +27,10 @@ resource "aws_cloudfront_cache_policy" "no_cache" {
   max_ttl     = 0
 
   parameters_in_cache_key_and_forwarded_to_origin {
-    enable_accept_encoding_gzip = true
+    # enable_accept_encoding_gzip is deliberately absent. CloudFront rejects it
+    # when caching is disabled — content-encoding negotiation only means
+    # something if responses are cached, and all TTLs here are zero.
+    # Compression still happens: `compress = true` on the cache behaviour below.
 
     cookies_config { cookie_behavior = "none" }
     headers_config { header_behavior = "none" }

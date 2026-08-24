@@ -33,15 +33,20 @@ variable "project" {
 
 variable "instance_type" {
   description = <<-EOT
-    ARM (Graviton) instances are roughly 20% cheaper than the x86 equivalent
-    and Node, Postgres, and Redis all have first-class arm64 images.
+    x86, not ARM, and that is deliberate.
 
-    t4g.small is 2 vCPU / 2 GB — enough to run the API, Postgres, and Redis
-    together for staging. t4g.micro (1 GB) will run out of memory once Postgres
-    and the Node heap are both loaded.
+    Graviton is about 20% cheaper, but postgis/postgis publishes no arm64
+    image and the container dies with an exec format error. Chasing a
+    community arm64 PostGIS build would mean staging and production running
+    a different database image from local development, which is the kind of
+    difference that hides bugs until they reach users. Roughly $3/month
+    buys that problem away.
+
+    t3.small is 2 vCPU / 2 GB, enough for the API, Postgres and Redis
+    together. t3.micro (1 GB) cannot hold Node plus Postgres.
   EOT
   type        = string
-  default     = "t4g.small"
+  default     = "t3.small"
 }
 
 variable "root_volume_gb" {
