@@ -1,0 +1,118 @@
+# ---------------------------------------------------------------------------
+# Secrets
+#
+# Generated here and stored in SSM Parameter Store as SecureStrings, so nothing
+# secret is typed by a human, committed, or written to disk on the instance.
+# The instance reads them at boot through its IAM role.
+#
+# They do land in Terraform state, which is why state is git-ignored and must
+# move to an encrypted S3 backend before anyone else runs this.
+# ---------------------------------------------------------------------------
+
+resource "random_password" "jwt_access" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "jwt_refresh" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "db" {
+  length = 32
+  # Excluded because the value goes into a postgres:// URL, where they would
+  # need escaping and silently break the connection string.
+  special = false
+}
+
+locals {
+  secrets = {
+    jwt_access_secret  = random_password.jwt_access.result
+    jwt_refresh_secret = random_password.jwt_refresh.result
+    db_password        = random_password.db.result
+  }
+}
+
+resource "aws_ssm_parameter" "secret" {
+  for_each = local.secrets
+
+  name  = "/${var.project}/${var.environment}/${each.key}"
+  type  = "SecureString"
+  value = each.value
+
+  tags = { Name = "${local.name}-${each.key}" }
+}
+
+resource "aws_iam_role_policy" "ssm_read" {
+  name = "${local.name}-ssm-read"
+  role = aws_iam_role.instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
+      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project}/${var.environment}/*"
+    }]
+  })
+}
+
+# ---------------------------------------------------------------------------
+# The instance
+# ---------------------------------------------------------------------------
+
+# Amazon Linux 2023, arm64 to match the Graviton instance type.
+data "aws_ssm_parameter" "ami" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+resource "aws_instance" "api" {
+  ami                    = data.aws_ssm_parameter.ami.value
+  instance_type          = var.instance_type
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.api.id]
+  iam_instance_profile   = aws_iam_instance_profile.instance.name
+
+  root_block_device {
+    volume_size = var.root_volume_gb
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
+  # IMDSv2 only. Version 1 lets any server-side request forgery bug in the app
+  # read the instance's IAM credentials with a plain GET.
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
+  user_data = templatefile("${path.module}/user-data.sh", {
+    aws_region          = var.aws_region
+    project             = var.project
+    environment         = var.environment
+    ecr_repository      = aws_ecr_repository.api.repository_url
+    media_bucket        = aws_s3_bucket.media.id
+    verification_bucket = aws_s3_bucket.verification.id
+    domain_name         = var.domain_name
+    log_level           = var.log_level
+  })
+
+  # Changing user-data replaces the instance. Explicit so a routine edit does
+  # not silently destroy a running environment without showing it in the plan.
+  user_data_replace_on_change = true
+
+  tags = { Name = "${local.name}-api" }
+}
+
+# A fixed address. Without it the public IP changes on every stop/start, and
+# anything pointing at the old one silently breaks.
+resource "aws_eip" "api" {
+  instance = aws_instance.api.id
+  domain   = "vpc"
+
+  tags = { Name = "${local.name}-eip" }
+}

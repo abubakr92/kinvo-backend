@@ -14,7 +14,14 @@ export const requestLogger: RequestHandler = (req, res, next) => {
 
     const payload = {
       method: req.method,
-      path: req.path,
+      // `baseUrl + path` is the full route without the query string.
+      //
+      // `req.path` alone is relative to whichever router matched, so a request
+      // to /api/v1/health logs as "/" — every line looks identical and the logs
+      // stop being useful the moment you need them. `req.originalUrl` would
+      // give the full path but drags the query string in with it, and query
+      // strings carry emails and reset tokens (spec §15).
+      path: `${req.baseUrl}${req.path}`,
       status: res.statusCode,
       duration_ms: Math.round(durationMs * 100) / 100,
       platform: req.header('x-platform') ?? null,
