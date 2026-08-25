@@ -163,6 +163,19 @@ export const envSchema = z.object({
     .string()
     .default('true')
     .transform((value) => value !== 'false'),
+
+  /**
+   * Serve browsable API docs at /docs.
+   *
+   * On by default: staging exists so the mobile team can read the contract, and
+   * the endpoint list is not a secret — every one of them is reachable by
+   * anyone with the base URL regardless. Set false on a production deployment
+   * that would rather not advertise its surface.
+   */
+  DOCS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((value) => value !== 'false'),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -241,7 +254,6 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
         issues[key] = [message];
       }
     }
-
   }
 
   if (result.data.NODE_ENV === 'production') {
