@@ -1,5 +1,6 @@
 import { UserStatus, prisma } from '@/db/prisma';
 import { getProfileFacts } from '@modules/profiles/completion.service';
+import { countEnabledModes } from '@modules/modes/modes.service';
 import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
 import { assertAdult } from '@utils/age';
@@ -51,6 +52,7 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
   }
 
   const facts = await getProfileFacts(userId);
+  const enabledModes = await countEnabledModes(userId);
 
   const steps: OnboardingStep[] = [
     {
@@ -80,6 +82,13 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
       is_complete: facts.approved_photo_count >= 1,
     },
     // Batch 5 adds: at least one enabled mode.
+    {
+      key: 'mode',
+      // spec §5.2: signup picks a primary mode. An account with none enabled
+      // has no deck to show, so onboarding is not finished without one.
+      label: 'Choose what you are here for',
+      is_complete: enabledModes >= 1,
+    },
   ];
 
   const missing = steps.filter((step) => !step.is_complete).map((step) => step.key);

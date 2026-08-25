@@ -235,6 +235,23 @@ enum MediaKind {
   @@map("media_kind")
 }
 
+/// spec §7 Batch 5: theme and accessibility are server-persisted so they follow
+/// the user across devices rather than resetting on a reinstall.
+enum ThemePreference {
+  system
+  light
+  dark
+
+  @@map("theme_preference")
+}
+
+enum DistanceUnit {
+  miles
+  kilometres
+
+  @@map("distance_unit")
+}
+
 enum DevicePlatform {
   ios
   android
@@ -403,6 +420,7 @@ model User {
   deleted_at DateTime?
 
   profile                Profile?
+  settings               UserSettings?
   auth_identities        AuthIdentity[]
   refresh_tokens         RefreshToken[]
   password_reset_tokens  PasswordResetToken[]
@@ -802,6 +820,48 @@ model UserMode {
   @@index([user_id])
   @@index([mode, is_enabled])
   @@map("user_modes")
+}
+
+/// Everything on the Settings and Mode & Privacy screens (spec §7, Batch 5).
+///
+/// One row per user, created on first read. Kept apart from Profile because
+/// none of it is ever shown to another user — a setting cannot leak into a deck
+/// card by being added to the wrong model.
+model UserSettings {
+  id      String @id @default(uuid(4)) @db.Uuid
+  user_id String @unique @db.Uuid
+
+  // --- Appearance --------------------------------------------------------
+  theme            ThemePreference @default(system)
+  /// 1.0 is the system default. Bounded by a CHECK in the migration.
+  text_scale       Float           @default(1.0)
+  reduce_motion    Boolean         @default(false)
+  high_contrast    Boolean         @default(false)
+
+  // --- Privacy -----------------------------------------------------------
+  /// spec §4.6 keeps the API in metres regardless; this is display only.
+  distance_unit    DistanceUnit @default(miles)
+  show_distance    Boolean      @default(true)
+  show_last_active Boolean      @default(true)
+  /// Hides the profile from anyone the user has not already matched with.
+  incognito        Boolean      @default(false)
+
+  // --- Discovery ---------------------------------------------------------
+  /// Global override on top of the per-mode verified_only filter.
+  global_verified_only Boolean @default(false)
+  /// Stop new matches without hiding the profile or losing existing ones.
+  pause_new_matches    Boolean @default(false)
+
+  // --- Account -----------------------------------------------------------
+  /// BCP-47. Mirrors the Accept-Language header the app sends (spec §4.11).
+  language String @default("en") @db.VarChar(10)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
 }
 
 // ============================================================================

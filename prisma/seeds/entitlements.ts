@@ -123,8 +123,11 @@ const FLAGS: FlagSeed[] = [
     label: 'Simultaneous modes',
     description: 'How many modes may be enabled at once. -1 is unlimited.',
     value_type: 'number',
-    free: 1, // PROVISIONAL — open decision #2
-    basic: 3,
+    // Decided by the product owner, 2026-08-26. Free gets three rather than one
+    // so the multi-mode idea is visible to someone who has not paid — one mode
+    // makes Kinvo look like every other dating app until you subscribe.
+    free: 3,
+    basic: 5, // PROVISIONAL — open decision #2
     advanced: UNLIMITED,
     provisional: true,
   },

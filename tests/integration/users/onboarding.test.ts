@@ -22,6 +22,16 @@ beforeEach(async () => {
   await prisma.interest.createMany({
     data: [{ slug: 'music', label: 'Music', category: 'general', modes: ['dating'] }],
   });
+
+  // Batch 5 gated onboarding on having a mode enabled, and enabling one reads
+  // the tier cap from the entitlement matrix. That matrix is data (spec §5.11),
+  // so tests must seed it exactly as the real seed does.
+  const flag = await prisma.entitlementFlag.create({
+    data: { key: 'max_simultaneous_modes', label: 'Simultaneous modes', value_type: 'number' },
+  });
+  await prisma.tierEntitlement.create({
+    data: { tier: 'free', flag_id: flag.id, value: 3 },
+  });
 });
 afterAll(closeDatabase);
 
@@ -45,6 +55,9 @@ async function satisfyRequirements(tokens: {
   // Batch 4 added "at least one approved photo" to the checklist. A deck full
   // of blank cards is not a product, so this is a real requirement.
   await addPhoto(tokens);
+  // Batch 5 added "at least one enabled mode". An account with none has no
+  // deck to show, so onboarding is not finished without one (spec §5.2).
+  await api.patch(`${API_PREFIX}/modes/dating`).set(auth).send({ is_enabled: true });
 }
 
 describe('GET /onboarding', () => {
@@ -63,9 +76,10 @@ describe('GET /onboarding', () => {
       'location',
       'interests',
       'photo',
+      'mode',
     ]);
     expect(response.body.data.missing).toEqual(
-      expect.arrayContaining(['bio', 'location', 'interests', 'photo']),
+      expect.arrayContaining(['bio', 'location', 'interests', 'photo', 'mode']),
     );
   });
 
@@ -106,7 +120,7 @@ describe('POST /onboarding/complete', () => {
     expect(response.status).toBe(403);
     expectErrorEnvelope(response.body, 'ONBOARDING_INCOMPLETE');
     expect(response.body.error.details.missing).toEqual(
-      expect.arrayContaining(['bio', 'location', 'interests', 'photo']),
+      expect.arrayContaining(['bio', 'location', 'interests', 'photo', 'mode']),
     );
   });
 

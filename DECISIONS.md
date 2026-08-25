@@ -48,11 +48,22 @@ Roles below: **PO** = product owner (Abubakr). **Eng** = the implementing agent.
 | **`X-RateLimit-*` legacy headers stay on.** The draft-7 `RateLimit` header is emitted alongside.                                     | 2026-08-14 | Eng | Spec §4.9 names `X-RateLimit-*` explicitly, so those are the client contract the Flutter app reads.                                                                                                                                                                                                              |
 | **Dev seed users share the password `kinvo-dev-password`.**                                                                          | 2026-08-14 | Eng | The mobile team needs sign-in-able accounts on staging. Safe because the seed only ever runs against development and staging databases.                                                                                                                                                                          |
 
+### 1.2c Resolved during Batches 4 and 5
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Free tier gets 3 simultaneous modes.** Basic 5, Advanced unlimited. | 2026-08-26 | PO | Eng proposed 2; PO chose 3. One mode makes Kinvo look like every other dating app until you pay, so the multi-mode idea has to be visible to someone who has not subscribed. Seeded value, changeable without code. |
+| **Enabling Cuddle requires an approved verification.** | 2026-08-26 | PO | Spec §5.7 flags Cuddle as elevated risk: physical-contact meetups, and it will attract misuse. Far easier to require from day one than to impose later on existing users. `can_enable` is returned up front so the app greys the toggle rather than letting the user tap into a 403. |
+| **Onboarding requires: display name, date of birth (18+), bio, location, ≥1 interest, ≥1 approved photo, ≥1 enabled mode.** | 2026-08-26 | Eng | A declared checklist in `onboarding.service.ts`, not scattered conditionals. Batch 4 added the photo, Batch 5 the mode. Adding a requirement is one entry there. |
+| **Account deletion is a soft delete; PII is NOT scrubbed.** | 2026-08-21 | PO | Deferred to Batch 12, where reports and evidence retention are on the table and it can be decided what must survive an erasure request. **This is a GDPR exposure until then** — recorded so it is a known debt, not a surprise. |
+| **Media auto-approval is an explicit env switch, forbidden in production.** | 2026-08-20 | Eng | Nothing moves a photo from pending to approved until Batch 10, so without it every uploaded photo is invisible to everyone. Same shape as the Twilio dev stub: useful locally, impossible to ship. **Batch 10 must delete `MEDIA_AUTO_APPROVE_UPLOADS` entirely.** |
+| **Staging waives third-party integrations** via `REQUIRE_THIRD_PARTY_INTEGRATIONS=false`. | 2026-08-25 | Eng | No Twilio, Google, or Apple accounts exist yet. Production still refuses to boot without them. The waiver deliberately does not relax the CORS or media-moderation rules, and a test asserts it cannot. **Must become true before real users sign in.** |
+| **API documentation is served at `/docs`**, brought forward from Batch 15. | 2026-08-26 | PO | The mobile team needed the contract. Request bodies generate from the Zod schemas the endpoints validate with, and a test fails the build if a route is undocumented. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
 | --- | ---------------------------------------------------------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 9   | Should enabling Cuddle mode require verification?                                                          | 5              | Spec §5.7 flags Cuddle as elevated risk and recommends yes.                                                                                                                  |
 | 6   | Match expiry TTL — how many days? **And what expiry does to the conversation.**                            | 7              | The spec asks only for the number. Eng flagged the missing half: does the conversation go read-only, vanish, or move to Archived? Does a new message reset the clock?        |
 | 7   | Free-tier daily swipe cap and message cap — numbers?                                                       | 7, 8           | Counter resets at UTC midnight (spec §5.3).                                                                                                                                  |
 | 10  | Is Rewind free or premium?                                                                                 | 7              |                                                                                                                                                                              |
@@ -237,6 +248,34 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 **`MEDIA_AUTO_APPROVE_UPLOADS` — a temporary switch, recorded so it is not forgotten.** spec §4.8 keeps pending media visible to its owner alone, but nothing moves a photo from pending to approved until the moderation pipeline lands in Batch 10. Without a switch, no uploaded photo would be visible to anyone and no deck card would ever render. It defaults on for development and staging and is **forced off in production** by env validation — the same shape as the Twilio dev stub. **Batch 10 must delete it.**
 
 **Still open, unchanged:** whether profile photo URLs move to CDN signed URLs instead of expiring presigned GETs, and whether media bytes move to Cloudflare R2 (identical API, no egress charges — which matters most for a photo-heavy app). Presigned GETs are correct for now; both remain decisions for the deployment.
+
+### 2026-08-25 — Deployment: AWS staging
+
+- Live at **https://dm9o5kgscmnxv.cloudfront.net/api/v1**. Terraform in `infra/`, ~$18/month against $120 of credits, $60 budget alert at 85% and 100%.
+- EC2 t3.small running the API, Postgres+PostGIS, Redis and Caddy in Docker. S3 replaces local MinIO. CloudFront supplies HTTPS on a `*.cloudfront.net` hostname, which satisfies iOS App Transport Security without a domain.
+- **Six bugs found by running it, none visible to a passing test suite:**
+  1. Prisma emitted ESM because `tsconfig.json` was copied after `prisma generate` — container died on boot, worked locally.
+  2. `req.path` is router-relative, so every request logged as `/`.
+  3. `postgis/postgis` publishes no arm64 image — crash-looped on Graviton. Switched to x86; architecture must agree in three places (instance type, AMI, Compose plugin).
+  4. `set -x` traced the JWT keys and database password into `/var/log/cloud-init-output.log`. Secrets rotated, tracing disabled around the block.
+  5. Caddy declared `depends_on: [api]`, so it could not start before the first image existed.
+  6. Env validation demanded static S3 keys in production — on AWS the instance role supplies them, so the check mandated the worse practice.
+- `infra/tfplan` was caught at `git add` — saved plans embed generated secrets in plaintext. Now git-ignored.
+- Deploys build **on the instance**: source is 280KB over S3, versus an 877MB image push that timed out repeatedly on this uplink.
+
+### 2026-08-26 — API documentation
+
+- `/api/v1/docs` (Swagger UI) and `/api/v1/docs/openapi.json`.
+- Request bodies generate from the same Zod schemas the endpoints validate with, so they cannot drift.
+- `tests/integration/docs.test.ts` parses the route files and fails if any endpoint is undocumented or documented-but-nonexistent.
+- Bug caught immediately: the document advertised `http://` because CloudFront sets `CloudFront-Forwarded-Proto`, not `X-Forwarded-Proto`. "Try it out" would have failed on first use.
+
+### 2026-08-26 — Batch 5: Modes and settings
+
+- 12 endpoints: modes (list, get, configure, primary), settings (get, update, snooze, resume), devices (list, revoke, revoke others).
+- Migration `user_settings` plus a CHECK bounding text scale to 0.8–2.0. **Prisma tried to drop the four PostGIS GIST indexes for the third time.**
+- Per-mode preference validation: one Zod schema per mode, `.strict()`, so `pet_type` on `dating` is rejected rather than stored where it would become a filter matching nobody.
+- **Security bug found by its own test: "revoke device" did not revoke.** The Device row recorded the id from the header or body; the refresh token recorded only the body. Signing in with `X-Device-Id` made them disagree, so the revoke matched no tokens, returned 200, and left the session alive. One resolved id now flows to both.
 
 ## 3. Batch plan and dependencies
 

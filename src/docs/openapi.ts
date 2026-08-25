@@ -5,6 +5,8 @@ import { API_PREFIX } from '@config/constants';
 import { ERROR_CODES, ERROR_MESSAGES, ERROR_STATUS, type ErrorCode } from '@utils/error-codes';
 import * as authSchema from '@modules/auth/auth.schema';
 import * as mediaSchema from '@modules/media/media.schema';
+import * as modesSchema from '@modules/modes/modes.schema';
+import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
 /**
@@ -450,6 +452,118 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.VALIDATION_FAILED, E.CONFLICT, E.NOT_FOUND, E.BAD_REQUEST],
   },
+  // --- modes --------------------------------------------------------------
+  {
+    method: 'get',
+    path: '/modes',
+    tag: 'Modes',
+    summary: 'All eight modes with their state',
+    description:
+      'Every mode, whether it is enabled, its per-mode preferences, and the label to render for its deck action. `can_enable` is false when a mode needs verification the user does not have — grey the toggle out rather than letting them tap it into a 403.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'get',
+    path: '/modes/{mode}',
+    tag: 'Modes',
+    summary: 'One mode',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'patch',
+    path: '/modes/{mode}',
+    tag: 'Modes',
+    summary: 'Enable, disable, or configure a mode',
+    description:
+      'Preferences are PER MODE — a 5km radius in Cuddle and 50km in Networking is normal. `preferences` holds mode-specific extras validated against that mode: relationship_goal for dating, subject and academic_level for study_buddy, pet_type for pet_dates, instruments for trading. An unknown key is rejected, not ignored. Enabling beyond your plan returns PREMIUM_REQUIRED with upgrade context; Cuddle returns FORBIDDEN without verification.',
+    body: modesSchema.updateModeSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.PREMIUM_REQUIRED, E.FORBIDDEN],
+  },
+  {
+    method: 'post',
+    path: '/modes/{mode}/primary',
+    tag: 'Modes',
+    summary: 'Set the primary mode',
+    description: 'Exactly one at a time. The mode must already be enabled.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+
+  // --- settings -----------------------------------------------------------
+  {
+    method: 'get',
+    path: '/settings',
+    tag: 'Settings',
+    summary: 'All settings',
+    description:
+      'Appearance, privacy, discovery, language, and snooze state. Stored server-side so they follow the user to a new device instead of resetting on reinstall.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'patch',
+    path: '/settings',
+    tag: 'Settings',
+    summary: 'Update settings',
+    description:
+      'Send only what changed. distance_unit is display only — the API always returns metres.',
+    body: settingsSchema.updateSettingsSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/settings/snooze',
+    tag: 'Settings',
+    summary: 'Hide from all decks',
+    description:
+      'The account stays active and existing matches and conversations survive. Omit ends_at to snooze until manually resumed.',
+    body: settingsSchema.snoozeSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'delete',
+    path: '/settings/snooze',
+    tag: 'Settings',
+    summary: 'Resume',
+    auth: true,
+    errors: [],
+  },
+
+  // --- devices ------------------------------------------------------------
+  {
+    method: 'get',
+    path: '/devices',
+    tag: 'Settings',
+    summary: 'Connected devices',
+    description:
+      'Send X-Device-Id and the current device is flagged with is_current, so the app can label it and stop the user signing themselves out by accident.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'delete',
+    path: '/devices/others',
+    tag: 'Settings',
+    summary: 'Sign out everywhere else',
+    description: 'Keeps the device making the request. Ends every other session for real.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'delete',
+    path: '/devices/{id}',
+    tag: 'Settings',
+    summary: 'Revoke one device',
+    description:
+      'Ends that session rather than only removing it from a list — the refresh token family bound to the device is revoked too.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.NOT_FOUND],
+  },
 ];
 
 /** Express :param -> OpenAPI {param}. */
@@ -675,6 +789,8 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       { name: 'Profile', description: 'Profile content and public views' },
       { name: 'Media', description: 'Uploads, photos' },
       { name: 'Verification', description: 'Identity verification' },
+      { name: 'Modes', description: 'The eight connection modes and their per-mode preferences' },
+      { name: 'Settings', description: 'Appearance, privacy, snooze, connected devices' },
     ],
     paths,
     components: COMPONENTS,

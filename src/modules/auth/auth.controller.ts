@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 
 import { isProduction } from '@config/env';
+import { CLIENT_HEADERS } from '@config/constants';
 import { requireUser } from '@middleware/authenticate';
+import { registerDevice } from '@modules/settings/devices.service';
 import { sendSuccess } from '@utils/response';
 import type {
   ChangePasswordBody,
@@ -16,7 +18,12 @@ import type {
 import * as authService from './auth.service';
 import * as otpService from './otp.service';
 import * as socialService from './social.service';
-import { issueTokenPair, revokeRefreshToken, rotateRefreshToken } from './token.service';
+import {
+  issueTokenPair,
+  revokeRefreshToken,
+  rotateRefreshToken,
+  verifyAccessToken,
+} from './token.service';
 
 /**
  * Controllers translate between HTTP and the service layer. No business logic,
@@ -31,8 +38,40 @@ export async function register(req: Request, res: Response): Promise<void> {
 
 export async function login(req: Request, res: Response): Promise<void> {
   const body = req.body as LoginBody;
-  const tokens = await authService.login(body);
+
+  // Resolved ONCE and used for both the refresh token and the Device row.
+  //
+  // They must be the same value. Revoking a device matches refresh tokens on
+  // device_id, so if the Device row recorded the header while the token
+  // recorded the body, revoking would match nothing, report success, and leave
+  // the session alive — a security screen telling the user a comforting lie.
+  const deviceId = body.device_id ?? req.get(CLIENT_HEADERS.DEVICE_ID);
+
+  const tokens = await authService.login({ ...body, device_id: deviceId });
+
+  // Best effort: a failure recording the device must not fail the sign-in.
+  if (deviceId) {
+    const payload = verifyAccessTokenSubject(tokens.access_token);
+    if (payload) {
+      await registerDevice({
+        userId: payload,
+        deviceId,
+        platform: req.get(CLIENT_HEADERS.PLATFORM) ?? 'web',
+        appVersion: req.get(CLIENT_HEADERS.APP_VERSION) ?? undefined,
+      }).catch((error: unknown) => req.log.warn({ err: error }, 'device registration failed'));
+    }
+  }
+
   sendSuccess(res, { ...tokens });
+}
+
+/** The user id from a token we just minted; null rather than throwing. */
+function verifyAccessTokenSubject(accessToken: string): string | null {
+  try {
+    return verifyAccessToken(accessToken).sub;
+  } catch {
+    return null;
+  }
 }
 
 export async function refresh(req: Request, res: Response): Promise<void> {
