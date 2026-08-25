@@ -22,9 +22,22 @@ export const docsRouter: Router = Router();
  * is added.
  */
 function serverUrlFrom(req: Request): string {
-  const proto = req.get('x-forwarded-proto') ?? req.protocol;
+  // CloudFront terminates TLS and talks to the origin over HTTP, so the
+  // request arriving here looks insecure. It announces the viewer's real
+  // scheme in CloudFront-Forwarded-Proto — NOT X-Forwarded-Proto, which it
+  // does not set. Reading only the standard header produced "http://" in the
+  // document, which points Swagger UI's "Try it out" at the wrong scheme.
+  const proto =
+    req.get('cloudfront-forwarded-proto') ?? req.get('x-forwarded-proto') ?? req.protocol;
+
   const host = req.get('x-forwarded-host') ?? req.get('host') ?? 'localhost';
-  return `${proto}://${host}`;
+
+  // Anything reached by a public hostname is HTTPS in practice; only local
+  // development is genuinely plain HTTP.
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  const scheme = isLocal ? proto : 'https';
+
+  return `${scheme}://${host}`;
 }
 
 docsRouter.get('/openapi.json', (req: Request, res: Response) => {

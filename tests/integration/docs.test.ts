@@ -180,6 +180,26 @@ describe('the docs endpoints', () => {
     expect(response.body.servers[0].url).toBe('https://api.example.com');
   });
 
+  it('reports https for a public host even though CloudFront calls the origin over http', async () => {
+    // The request reaching the origin is genuinely plain HTTP. Trusting that
+    // put "http://" in the document and pointed "Try it out" at the wrong
+    // scheme. CloudFront announces the viewer's scheme in its own header.
+    const response = await api
+      .get(`${API_PREFIX}/docs/openapi.json`)
+      .set('cloudfront-forwarded-proto', 'https')
+      .set('x-forwarded-host', 'dm9o5kgscmnxv.cloudfront.net');
+
+    expect(response.body.servers[0].url).toBe('https://dm9o5kgscmnxv.cloudfront.net');
+  });
+
+  it('still reports http for local development', async () => {
+    const response = await api.get(`${API_PREFIX}/docs/openapi.json`);
+
+    // Supertest connects over plain HTTP to a local address, which is the one
+    // case where http is the truth rather than a proxy artefact.
+    expect(response.body.servers[0].url).toMatch(/^http:\/\/(127\.0\.0\.1|localhost)/);
+  });
+
   it('serves the Swagger UI page', async () => {
     const response = await api.get(`${API_PREFIX}/docs/`);
 
