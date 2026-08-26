@@ -12,10 +12,13 @@ import { type BucketName, presignDownload } from '@/providers/s3.provider';
 import { getPrimaryPhotoUrlsFor } from '@modules/media/photos.service';
 import { getBlockedUserIds, isBlockedBetween } from '@modules/safety/block.service';
 import { isExpired, otherUserId } from '@modules/matches/matches.service';
+import { otherParticipantId } from '@/realtime/participants';
+import { onlineStatusFor } from '@/realtime/presence';
 import { ApiError } from '@utils/api-error';
 import { USER_COMPACT_SELECT, type UserCompact, toUserCompact } from '@utils/compact';
 import { decodeCursor, paginate } from '@utils/cursor';
 import { ERROR_CODES } from '@utils/error-codes';
+import { emitConversationUpdated, emitMessage, emitMessageRead } from '@/realtime/emit';
 import type { SendMessageBody } from './chat.schema';
 
 /**
@@ -119,6 +122,7 @@ function toConversationView(
   viewerId: string,
   photoUrl: string | null,
   isBlocked: boolean,
+  isOnline: boolean,
   now = new Date(),
 ): ConversationView {
   const other = participantFor(conversation, viewerId);
@@ -128,7 +132,7 @@ function toConversationView(
     id: conversation.id,
     match_id: conversation.match_id,
     mode: conversation.mode,
-    user: toUserCompact(other, photoUrl),
+    user: toUserCompact(other, photoUrl, isOnline),
     last_message_at: conversation.last_message_at?.toISOString() ?? null,
     last_message_preview: conversation.last_message_preview,
     unread_count: state?.unread_count ?? 0,
@@ -177,9 +181,10 @@ export async function listConversations(
   }));
 
   const otherIds = page.items.map((conversation) => participantFor(conversation, viewerId).id);
-  const [photoUrls, blockedUserIds] = await Promise.all([
+  const [photoUrls, blockedUserIds, online] = await Promise.all([
     getPrimaryPhotoUrlsFor(otherIds),
     getBlockedUserIds(viewerId),
+    onlineStatusFor(otherIds),
   ]);
 
   const blocked = new Set(blockedUserIds);
@@ -193,6 +198,7 @@ export async function listConversations(
         viewerId,
         photoUrls.get(other.id) ?? null,
         blocked.has(other.id),
+        online.has(other.id),
         now,
       );
     }),
@@ -213,12 +219,19 @@ export async function getConversation(
     throw ApiError.notFound();
   }
 
-  const [photoUrls, blocked] = await Promise.all([
+  const [photoUrls, blocked, online] = await Promise.all([
     getPrimaryPhotoUrlsFor([other.id]),
     isBlockedBetween(viewerId, other.id),
+    onlineStatusFor([other.id]),
   ]);
 
-  return toConversationView(conversation, viewerId, photoUrls.get(other.id) ?? null, blocked);
+  return toConversationView(
+    conversation,
+    viewerId,
+    photoUrls.get(other.id) ?? null,
+    blocked,
+    online.has(other.id),
+  );
 }
 
 async function toMessageView(message: {
@@ -450,7 +463,28 @@ export async function sendMessage(
       return created;
     });
 
-    return toMessageView(message);
+    const view = await toMessageView(message);
+
+    // PERSIST FIRST, THEN EMIT (spec §7). This runs after the transaction has
+    // committed, so the socket can never announce a message that a rollback
+    // erased. The emit is best-effort: the write already succeeded, and failing
+    // the request now would tell the user their message did not send when it
+    // did.
+    emitMessage(recipientId, view);
+
+    const recipientState = await prisma.conversationState.findFirst({
+      where: { conversation_id: conversationId, user_id: recipientId },
+      select: { unread_count: true },
+    });
+
+    emitConversationUpdated(recipientId, {
+      conversation_id: conversationId,
+      unread_count: recipientState?.unread_count ?? 0,
+      last_message_at: view.created_at,
+      last_message_preview: previewFor(input.type, input.body ?? null),
+    });
+
+    return view;
   } catch (error) {
     // Never charge for a message the database rejected.
     await refundQuota(viewerId, 'messages');
@@ -487,6 +521,17 @@ export async function markRead(viewerId: string, conversationId: string): Promis
       data: { read_at: now },
     }),
   ]);
+
+  // After the write, so a failed update cannot move the other person's ticks.
+  const other = await otherParticipantId(conversationId, viewerId);
+
+  if (other) {
+    emitMessageRead(other, {
+      conversation_id: conversationId,
+      reader_id: viewerId,
+      read_at: now.toISOString(),
+    });
+  }
 
   return {
     conversation_id: conversationId,

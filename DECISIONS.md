@@ -114,6 +114,19 @@ listed with what it costs to change later.
 | **Unmatch is a status change, not a delete.** | 2026-08-26 | Eng | `unmatched_by_id` is what a later report investigation needs, and it is never exposed to the other person. The swipes stay so the pair is not offered to each other again in that mode. |
 | **A new message un-archives the thread for the recipient.** | 2026-08-26 | Eng | Otherwise an archived conversation is silently unreachable while its unread badge counts up. |
 
+### 1.2h Resolved during Batch 9 (realtime)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Realtime is a DELIVERY layer, never a second write path.** | 2026-08-26 | Eng | Spec §7: persist first, then emit. Every socket event describes something already committed, and every emitter is called after its transaction. A dropped socket costs a refresh, never a message, and the whole feature can be switched off without the product losing correctness. |
+| **Typing indicators are addressed to the other participant, not a shared room.** | 2026-08-26 | Eng | A conversation room has to be joined first, which makes delivery depend on a join the sender cannot observe — the recipient silently misses indicators. Every conversation has exactly two people (#11), so addressing the other one directly is simpler and cannot race. |
+| **Presence counts CONNECTIONS, not users.** | 2026-08-26 | Eng | A boolean marks someone offline the moment one of two devices closes. A Redis set of socket ids, with a 90s TTL so a commuter switching networks does not flicker offline and fan an event out to every match. |
+| **Presence is only ever sent to active matches, never across a block.** | 2026-08-26 | Eng | Broadcasting it widely tells strangers when someone is at their phone; telling a blocked person hands them a live activity feed of the person who blocked them. Two tests assert both negatives. |
+| **Online state in Redis, `last_active_at` in Postgres.** | 2026-08-26 | Eng | Online state changes on every connect and is worthless after a restart. `last_active_at` is shown on profiles long after the socket is gone, so it is durable — written on a 5-minute throttle rather than on every heartbeat. |
+| **`is_online` is resolved in BULK by the caller.** | 2026-08-26 | Eng | `toUserCompact` takes it as a parameter for the same reason it takes the photo URL: reading presence per row is the N+1 that compact objects exist to prevent. It defaults to false, so a list that has not resolved presence understates activity rather than claiming someone is available. |
+| **The socket contract is its own document at `/docs/realtime.json`.** | 2026-08-26 | Eng | OpenAPI has no vocabulary for socket events. Generated from the same Zod schemas the server validates against, so the document cannot describe a payload the server would reject, and a drift test fails the build on an undocumented event. |
+| **The socket shares the HTTP server and port.** | 2026-08-26 | Eng | A separate port needs its own load-balancer rule and its own certificate. Riding the same server means realtime inherits the TLS termination and CORS policy the REST API already has. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -358,6 +371,19 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 - Every closed-conversation reason answers one identical 403. A test asserts the blocker and blocked sides receive the same status, code, and message.
 - Match expiry sweep added to the daily job — bookkeeping only, since expiry is decided at read time.
 
+### 2026-08-26 — Batch 9: Realtime
+
+- Socket.IO on the same HTTP server. JWT handshake, per-user rooms, message delivery, typing, read receipts, presence, plan updates.
+- The contract is published at `GET /docs/realtime.json`, generated from the Zod schemas the server validates with. A drift test fails the build if an event is added without a documented shape.
+- `is_online` in `user_compact` became real. It was hardcoded false since Batch 3 — a lie in a shipped contract.
+
+**Four bugs found by the tests, three of them real production defects:**
+
+- **Handlers were registered after several awaits in `onConnection`.** Socket.IO drops a packet with no listener, so a client that emits the moment it connects — exactly what a chat app does when reopening a thread — silently lost the event. Three tests failed on this one cause. Handlers now register before any await.
+- **A short-lived connection left a phantom "online" entry.** `markOnline` could land after `markOffline` when a socket opened and closed within milliseconds, leaving the user online until the TTL lapsed. The disconnect handler now waits for the connect sequence before undoing it.
+- **Every expired token read as INVALID.** The handshake caught `TokenExpiredError`, but `verifyAccessToken` had already mapped it to an `ApiError` — so the catch never matched. The app signs the user out on INVALID and refreshes on EXPIRED, so this turned every routine 30-minute expiry into a forced sign-out. Now reuses the existing mapping instead of repeating it.
+- Typing indicators depended on a room join the sender could not observe; switched to addressing the other participant directly.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -374,7 +400,7 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 6     | Entitlements (stub)         | ✅     | Redis                                                        | —                              |
 | 7     | Discovery and matching      | ✅     | Redis + BullMQ                                               | #6, #7, #10 — see **1.2e**     |
 | 8     | Matches and chat REST       | ✅     | Docker                                                       | #7; block visibility           |
-| 9     | Realtime                    | ▶      | Redis. **Host must support WebSockets**                      | —                              |
+| 9     | Realtime                    | ✅     | Redis. **Host must support WebSockets**                      | —                              |
 | 10    | Moderation                  | ⬜     | Moderation provider account                                  | **#8**                         |
 | 11    | Notifications               | ⬜     | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ⬜     | S3 (report evidence)                                         | Block visibility               |

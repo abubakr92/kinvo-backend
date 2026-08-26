@@ -3,6 +3,7 @@ import swaggerUi from 'swagger-ui-express';
 
 import { env } from '@config/env';
 import { buildOpenApiDocument } from './openapi';
+import { buildRealtimeDocument } from './realtime-docs';
 
 /**
  * Browsable API documentation.
@@ -44,6 +45,15 @@ docsRouter.get('/openapi.json', (req: Request, res: Response) => {
   // Not the standard envelope: this is an OpenAPI document, and every tool that
   // consumes one expects it at the top level.
   res.json(buildOpenApiDocument(serverUrlFrom(req)));
+});
+
+/**
+ * The socket contract. Its own document because OpenAPI has no vocabulary for
+ * socket events, and bending one into shape would describe them worse than a
+ * small purpose-built document does.
+ */
+docsRouter.get('/realtime.json', (req: Request, res: Response) => {
+  res.json(buildRealtimeDocument(serverUrlFrom(req)));
 });
 
 docsRouter.use(

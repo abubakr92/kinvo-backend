@@ -6,6 +6,7 @@ import { env } from '@config/env';
 import { connectDatabase, disconnectDatabase } from '@/db/prisma';
 import { connectRedis, disconnectRedis } from '@/db/redis';
 import { startJobs, stopJobs } from '@/jobs';
+import { closeSocketServer, createSocketServer } from '@/realtime/socket.server';
 import { logger } from '@utils/logger';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -24,12 +25,19 @@ async function start(): Promise<Server> {
   // After Redis: BullMQ opens its own connections and needs one that works.
   await startJobs();
 
-  return app.listen(env.PORT, env.HOST, () => {
+  const listening = app.listen(env.PORT, env.HOST, () => {
     logger.info(
       { port: env.PORT, host: env.HOST, environment: env.NODE_ENV, api_prefix: API_PREFIX },
       'kinvo api listening',
     );
   });
+
+  // Attached to the same HTTP server, so realtime rides the port and TLS
+  // termination the REST API already has. A separate port would need its own
+  // load-balancer rule and its own certificate.
+  createSocketServer(listening);
+
+  return listening;
 }
 
 let server: Server | undefined;
@@ -64,8 +72,11 @@ function shutdown(signal: string): void {
   const closeConnections = async (): Promise<void> => {
     // Only after the HTTP server has stopped accepting and drained, or we would
     // sever queries belonging to requests still in flight.
-    // Workers stop first so a job in flight finishes against a live database
-    // rather than failing on a pool that closed underneath it.
+    // Sockets first: disconnecting clients while the database is still up lets
+    // the disconnect handlers finish their presence writes. Then workers, so a
+    // job in flight finishes against a live pool rather than one that closed
+    // underneath it.
+    await closeSocketServer();
     await stopJobs();
     await Promise.allSettled([disconnectDatabase(), disconnectRedis()]);
   };

@@ -4,6 +4,7 @@ import { requireFeature } from '@modules/entitlements/entitlements.service';
 import { ENTITLEMENT_KEYS } from '@modules/entitlements/entitlements.types';
 import { getPrimaryPhotoUrlsFor } from '@modules/media/photos.service';
 import { getBlockedUserIds } from '@modules/safety/block.service';
+import { onlineStatusFor } from '@/realtime/presence';
 import { ApiError } from '@utils/api-error';
 import { USER_COMPACT_SELECT, type UserCompact, toUserCompact } from '@utils/compact';
 import { decodeCursor, paginate } from '@utils/cursor';
@@ -97,6 +98,7 @@ function toMatchView(
   viewerId: string,
   photoUrls: Map<string, string>,
   blockedUserIds: Set<string>,
+  online: Set<string>,
   now = new Date(),
 ): MatchView {
   const other = match.user_a_id === viewerId ? match.user_b : match.user_a;
@@ -113,7 +115,7 @@ function toMatchView(
     is_expired: expired,
     extension_count: match.extension_count,
     is_writable: !expired && match.status === MatchStatus.active && !blockedUserIds.has(other.id),
-    user: toUserCompact(other, photoUrls.get(other.id) ?? null),
+    user: toUserCompact(other, photoUrls.get(other.id) ?? null, online.has(other.id)),
     conversation_id: match.conversation?.id ?? null,
     last_message_at: match.conversation?.last_message_at?.toISOString() ?? null,
     last_message_preview: match.conversation?.last_message_preview ?? null,
@@ -165,15 +167,21 @@ export async function listMatches(viewerId: string, options: ListMatchesOptions)
     id: match.id,
   }));
 
-  const photoUrls = await getPrimaryPhotoUrlsFor(
-    page.items.map((match) => otherUserId(match, viewerId)),
-  );
+  const otherIds = page.items.map((match) => otherUserId(match, viewerId));
+
+  // Both resolved in bulk, one round trip each, rather than per row.
+  const [photoUrls, online] = await Promise.all([
+    getPrimaryPhotoUrlsFor(otherIds),
+    onlineStatusFor(otherIds),
+  ]);
 
   const now = new Date();
   const blocked = new Set(blockedUserIds);
 
   return {
-    matches: page.items.map((match) => toMatchView(match, viewerId, photoUrls, blocked, now)),
+    matches: page.items.map((match) =>
+      toMatchView(match, viewerId, photoUrls, blocked, online, now),
+    ),
     next_cursor: page.next_cursor,
     has_more: page.has_more,
     limit: page.limit,
@@ -206,12 +214,13 @@ export async function getMatch(viewerId: string, matchId: string): Promise<Match
     throw ApiError.notFound();
   }
 
-  const [photoUrls, blockedUserIds] = await Promise.all([
+  const [photoUrls, blockedUserIds, online] = await Promise.all([
     getPrimaryPhotoUrlsFor([other.id]),
     getBlockedUserIds(viewerId),
+    onlineStatusFor([other.id]),
   ]);
 
-  return toMatchView(match, viewerId, photoUrls, new Set(blockedUserIds));
+  return toMatchView(match, viewerId, photoUrls, new Set(blockedUserIds), online);
 }
 
 /**

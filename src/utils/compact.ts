@@ -33,23 +33,18 @@ export interface UserCompactSource {
 }
 
 /**
- * Presence is real-time state that Socket.IO owns from Batch 9. Until then
- * every user reads as offline rather than the key being absent — spec §4.6
- * requires the key to exist with a null-or-default value, not to disappear.
- */
-function resolveIsOnline(): boolean {
-  return false;
-}
-
-/**
  * @param primaryPhotoUrl passed in rather than read from a nested relation, so
- * every caller decides explicitly how it loads the photo. Photos arrive in
- * Batch 4; until then callers pass null, and the key is always present rather
- * than omitted (spec §4.6).
+ * every caller decides explicitly how it loads the photo.
+ * @param isOnline passed in for the same reason, and resolved in BULK by the
+ * caller via `onlineStatusFor`. Reading presence per row here would be the N+1
+ * this shape exists to prevent (spec §4.7). Defaults to false: a list that has
+ * not resolved presence understates activity rather than claiming someone is
+ * available when nobody knows.
  */
 export function toUserCompact(
   source: UserCompactSource,
   primaryPhotoUrl: string | null = null,
+  isOnline = false,
 ): UserCompact {
   return {
     id: source.id,
@@ -59,7 +54,7 @@ export function toUserCompact(
     primary_photo_url: primaryPhotoUrl,
     is_verified: source.is_verified,
     is_premium: source.subscription_tier !== 'free',
-    is_online: resolveIsOnline(),
+    is_online: isOnline,
     // spec §4.6: UTC ISO-8601 with Z.
     last_active_at: source.last_active_at.toISOString(),
   };

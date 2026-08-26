@@ -10,6 +10,7 @@ import { ERROR_CODES } from '@utils/error-codes';
 import { USER_COMPACT_SELECT, type UserCompact, toUserCompact } from '@utils/compact';
 import { decodeCursor, paginate } from '@utils/cursor';
 import { logger } from '@utils/logger';
+import { emitMatch } from '@/realtime/emit';
 import { consumeDeckEntry, requireEnabledMode, restoreDeckEntry } from './deck.service';
 
 /**
@@ -121,6 +122,12 @@ export async function swipe(
     }
 
     throw error;
+  }
+
+  // PERSIST FIRST, THEN EMIT (spec §7). Outside the transaction, so a rollback
+  // cannot leave both people notified of a match that does not exist.
+  if (match) {
+    await announceMatch(match, actorId, targetId);
   }
 
   return {
@@ -281,4 +288,47 @@ export async function countLikesYou(userId: string, mode: Mode): Promise<number>
       NOT: { actor: { swipes_received: { some: { actor_id: userId, mode } } } },
     },
   });
+}
+
+/**
+ * Tells both people about a new match.
+ *
+ * Each side is sent the OTHER person, so the payload is directly renderable
+ * without the client working out which half of the pair it is looking at.
+ */
+async function announceMatch(match: MatchModel, actorId: string, targetId: string): Promise<void> {
+  const [users, photoUrls, conversation] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: [actorId, targetId] } },
+      select: USER_COMPACT_SELECT,
+    }),
+    getPrimaryPhotoUrlsFor([actorId, targetId]),
+    prisma.conversation.findUnique({
+      where: { match_id: match.id },
+      select: { id: true },
+    }),
+  ]);
+
+  const byId = new Map(users.map((user) => [user.id, user]));
+
+  for (const [recipient, other] of [
+    [actorId, targetId],
+    [targetId, actorId],
+  ] as const) {
+    const otherUser = byId.get(other);
+
+    if (!otherUser) {
+      continue;
+    }
+
+    emitMatch(recipient, {
+      match_id: match.id,
+      conversation_id: conversation?.id ?? null,
+      mode: match.mode,
+      is_super_like: match.is_super_like,
+      matched_at: match.matched_at.toISOString(),
+      expires_at: match.expires_at.toISOString(),
+      user: toUserCompact(otherUser, photoUrls.get(other) ?? null),
+    });
+  }
 }

@@ -187,6 +187,17 @@ Return `404`, not `403`, when a block is the reason; a 403 confirms the resource
 
 **Cursors.** Opaque base64, built and read only by `src/utils/cursor.ts`. Anything that parses a cursor elsewhere has turned it into an API surface, and the ordering key can never change again without a client release. Fetch `limit + 1` rows and let `paginate()` derive `has_more` — a COUNT over a large filtered set costs more than the page.
 
+**Realtime (spec §7).** Socket.IO is a **delivery layer, never a second write path**. Persist first, then emit — every emitter is called after its transaction commits, never inside one, or a rollback would announce a message that does not exist.
+
+- **Register socket handlers before any `await` in the connection handler.** Socket.IO drops packets that have no listener yet, so every await is a window where a client emitting on connect loses the event silently.
+- The disconnect handler **waits for the connect sequence** before undoing it. A socket that opens and closes in milliseconds otherwise leaves a phantom online entry.
+- Presence counts **connections, not users** — a boolean marks someone offline when one of two devices closes. Redis, 90s TTL so network switches do not flicker.
+- Presence is sent **only to active matches, never across a block**. Anything wider is an activity feed on someone who never agreed to share one.
+- Online state is Redis; `last_active_at` is Postgres on a throttle. Never write presence to a durable store.
+- `is_online` is resolved in bulk via `onlineStatusFor` and passed into `toUserCompact`, like the photo URL. Per-row presence is the same N+1 compact objects exist to prevent.
+- Socket payloads are as untrusted as request bodies: validated by the same Zod schemas that generate `/docs/realtime.json`, so the docs cannot describe a payload the server rejects.
+- The handshake reuses `verifyAccessToken`'s error mapping. Do not re-catch `TokenExpiredError` — it has already been converted, and a duplicate mapping turns every expiry into a sign-out.
+
 **Jobs.** BullMQ needs its own Redis connection with `maxRetriesPerRequest: null`; its blocking commands would otherwise stall every rate-limit and quota command behind a worker poll. Nothing starts on import — tests load the Express app and must not open queues. A scheduler that fans out on the queue it feeds must branch on **job name**, or the repeatable job arrives with empty data and the worker processes it as real work.
 
 **Onboarding.** The requirement list is a declared checklist in `src/modules/users/onboarding.service.ts`. Adding a requirement is one entry there — never a new condition scattered into the transition. Batch 4 adds "≥1 approved photo", Batch 5 adds "≥1 enabled mode".
