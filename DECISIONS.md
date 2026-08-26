@@ -394,6 +394,11 @@ Runs between Batch 3 and Batch 4. Target: the mobile team gets a working staging
 
 ---
 
+### 4.1 Deployment traps
+
+- **`deploy.sh` must be passed the image tag docker-compose references**, which is the ECR URI `<account>.dkr.ecr.us-east-1.amazonaws.com/kinvo-staging-api:latest` — not a convenient local name like `kinvo-api:latest`. Passing the wrong tag builds a fresh image that nothing runs: the script reports success, the health check passes against the OLD container, and the deploy looks clean while changing nothing. Caught on the Batch 6 deploy when `/me/entitlements` still 404ed after a "successful" run.
+- **The AWS CLI cannot print Docker build output on Windows.** BuildKit draws box characters (U+2502) and the CLI dies with a `charmap` codec error, hiding the entire result. Redirect the deploy to a file on the instance and read it back through `tr -cd "[:print:][:space:]"`.
+
 ## 5. Standing engineering decisions
 
 Choices made while building that the specification did not dictate. Recorded so they are not silently reversed.
