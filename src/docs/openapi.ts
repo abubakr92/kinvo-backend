@@ -7,6 +7,7 @@ import * as authSchema from '@modules/auth/auth.schema';
 import * as mediaSchema from '@modules/media/media.schema';
 import * as modesSchema from '@modules/modes/modes.schema';
 import { swipeBodySchema } from '@modules/discovery/discovery.schema';
+import { sendMessageSchema, updateConversationSchema } from '@modules/chat/chat.schema';
 import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
@@ -515,6 +516,118 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.VALIDATION_FAILED],
   },
+  // --- matches ------------------------------------------------------------
+  {
+    method: 'get',
+    path: '/matches',
+    tag: 'Matches',
+    summary: 'The Matches tab',
+    description:
+      'Cursor-paginated, newest first, with the conversation id, unread count, and last message preview on each row so the list renders in one request. `?archived=true` is the Archived tab. **The Requests tab is a different endpoint** — `GET /discovery/{mode}/likes-you` — because Requests holds profiles who liked you, not conversations. `is_writable` is false when the pair is blocked, the match expired, or it was unmatched: hide the composer on it rather than discovering the state from a rejected send.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/matches/{id}',
+    tag: 'Matches',
+    summary: 'One match',
+    description:
+      'Answers 404 for a match that is not yours, was unmatched, or never existed — all three identically.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'delete',
+    path: '/matches/{id}',
+    tag: 'Matches',
+    summary: 'Unmatch',
+    description:
+      'Final and symmetric: the match disappears for both people at once. The swipes stay, so neither is offered the other again in this mode. Who unmatched is recorded for later report investigations and is never exposed to the other person.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/matches/{id}/extend',
+    tag: 'Matches',
+    summary: 'Push back the expiry',
+    description:
+      'Extends from the current expiry rather than from now, so extending a match with days left adds the window instead of shortening it. An already-expired match becomes live again. Premium.',
+    auth: true,
+    errors: [E.PREMIUM_REQUIRED, E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  // --- chat ---------------------------------------------------------------
+  {
+    method: 'get',
+    path: '/conversations',
+    tag: 'Chat',
+    summary: 'Conversation list',
+    description:
+      'Ordered by activity, not creation. Carries the other participant, unread count, and last message preview so the list needs no follow-up calls. There is no endpoint that creates a conversation: one is created with its match, and users cannot message before matching.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/conversations/unread-count',
+    tag: 'Chat',
+    summary: 'Total unread, for the app badge',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'get',
+    path: '/conversations/{id}',
+    tag: 'Chat',
+    summary: 'One conversation',
+    description:
+      'The chat header. `mode` is inherited from the match and never changes. `is_writable` false means the composer should be hidden.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'patch',
+    path: '/conversations/{id}',
+    tag: 'Chat',
+    summary: 'Archive or mute',
+    description:
+      'Per user, not shared — archiving does not archive it for the other person. A new message pulls the thread back out of the archive.',
+    body: updateConversationSchema,
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/conversations/{id}/messages',
+    tag: 'Chat',
+    summary: 'Message history, newest first',
+    description:
+      '**This list paginates BACKWARDS**, unlike every other list in this API: the first page is the most recent messages and the cursor walks into the past, because a chat opens at the bottom. A blocked pair keeps its history readable; only sending is refused.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/conversations/{id}/messages',
+    tag: 'Chat',
+    summary: 'Send a message',
+    description:
+      'Types: text, image, video, voice_note, venue_card. Media types need a `media_asset_id` from a completed upload that you own and that was uploaded as the matching kind. Voice notes carry `duration_ms`. Spends daily message quota, refunded if the write fails. Answers 403 with an identical message for every closed-conversation reason — blocked, expired, unmatched — so a block cannot be confirmed by elimination.',
+    body: sendMessageSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.FORBIDDEN, E.NOT_FOUND, E.QUOTA_EXCEEDED],
+  },
+  {
+    method: 'post',
+    path: '/conversations/{id}/read',
+    tag: 'Chat',
+    summary: 'Mark read',
+    description:
+      'Clears your unread badge and stamps `read_at` on the other person’s messages so their ticks update. Never stamps your own.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
   // --- entitlements -------------------------------------------------------
   {
     method: 'get',
@@ -864,6 +977,8 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       { name: 'Media', description: 'Uploads, photos' },
       { name: 'Verification', description: 'Identity verification' },
       { name: 'Discovery', description: 'Decks, swipes, matches forming, boosts' },
+      { name: 'Matches', description: 'The Matches and Archived tabs, unmatch, extend' },
+      { name: 'Chat', description: 'Conversations, messages, read state' },
       {
         name: 'Entitlements',
         description: 'Plan features and daily quotas',

@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 
 import { ALL_MODES } from '@modules/modes/modes.service';
 import { generateDeck, usersNeedingDecks } from '@modules/discovery/deck.service';
+import { sweepExpiredMatches } from '@modules/matches/matches.service';
 import { logger } from '@utils/logger';
 import { QUEUE_NAMES, type DeckGenerationJob, getDeckQueue, jobConnection } from './queues';
 
@@ -33,8 +34,12 @@ export function startDeckWorker(): Worker<DeckGenerationJob> {
       // branch the repeatable job arrives with empty data and the worker tries
       // to build a deck for an undefined user.
       if (job.name === SCHEDULER_JOB_NAME) {
-        const enqueued = await enqueueDailyDecks();
-        return { enqueued };
+        // Bookkeeping only: `isExpired` already treats a lapsed match as
+        // expired at read time, so this job being late or never running
+        // changes nothing a user can see. It exists so admin lists and
+        // analytics can filter on the column.
+        const [enqueued, expired] = await Promise.all([enqueueDailyDecks(), sweepExpiredMatches()]);
+        return { enqueued, expired };
       }
 
       const { user_id, mode } = job.data;

@@ -101,6 +101,19 @@ listed with what it costs to change later.
 | **The deck pre-excludes cheaply, then applies the shared clause in Prisma.** | 2026-08-26 | Eng | PostGIS cannot compose `visibleUserFilter`, so the radius query takes an exclusion array (self, blocks, already-swiped) and the real clause runs on the result. `CANDIDATE_POOL` is 500 against a deck of 50, so the two-phase split cannot truncate a correct answer. |
 | **Cursors are opaque base64, never parsed outside `@utils/cursor`.** | 2026-08-26 | Eng | The moment anything reads a cursor payload it becomes an API surface, and the ordering key can never change again without a client release. |
 
+### 1.2g Resolved during Batch 8 (matches and chat)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Block visibility: the conversation stays VISIBLE and FROZEN.** | 2026-08-26 | Eng (placeholder, see 1.2e) | Spec §5.5 says read-only, §4.4 says do not confirm a block; these pull in opposite directions. Hiding the thread makes history vanish mid-scroll and reads as data loss. Leaving it writable defeats the block. Visible-and-frozen satisfies both, and the send error is identical for every closed reason. |
+| **Every closed-conversation reason answers the SAME 403.** | 2026-08-26 | Eng | Blocked, expired, unmatched, and other-account-deleted return byte-identical errors. Distinguishing them would let someone confirm a block by elimination — the same leak a 403 on a blocked profile causes. A test asserts the blocker and the blocked side get identical status, code, and message. |
+| **`is_writable` is returned on matches and conversations.** | 2026-08-26 | Eng | The app hides the composer on a flag rather than discovering the state by having a send rejected. Without it the only way to learn a thread is frozen is to type a message and lose it. |
+| **Match expiry is computed at READ time; the sweeper is bookkeeping.** | 2026-08-26 | Eng | A row whose `expires_at` has passed is expired the moment it passes. Trusting the status column would leave matches writable for however long the job is behind, so a queue outage would silently extend everyone. The job only updates the column for admin lists and analytics. |
+| **Extend adds to the CURRENT expiry, not to now.** | 2026-08-26 | Eng | Extending a match with three days left must give the full window on top, not reset it to a shorter one. An already-expired match extends from now, so it becomes usable again rather than staying expired. |
+| **The conversation is created inside the match transaction.** | 2026-08-26 | Eng | A match can never exist without somewhere to talk, and the chat module never has to handle a missing conversation. Both `conversation_state` rows are created at the same time so the unread badge has somewhere to live from the first message. |
+| **Unmatch is a status change, not a delete.** | 2026-08-26 | Eng | `unmatched_by_id` is what a later report investigation needs, and it is never exposed to the other person. The swipes stay so the pair is not offered to each other again in that mode. |
+| **A new message un-archives the thread for the recipient.** | 2026-08-26 | Eng | Otherwise an archived conversation is silently unreachable while its unread badge counts up. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -336,6 +349,15 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 - **Bug found while writing the worker:** the scheduler fans out on the queue it feeds, so the repeatable job arrived with empty data and the worker tried to build a deck for an undefined user. The worker now branches on job name.
 - Cursor pagination added (`@utils/cursor`), first used here and reused by matches, messages, and notifications from Batch 8.
 
+### 2026-08-26 — Batch 8: Matches and chat REST
+
+- 11 endpoints: matches (list, detail, unmatch, extend) and conversations (list, detail, messages, send, read, archive/mute, unread-count).
+- **Messages paginate BACKWARDS** — the only list in the API that does. A chat opens at the bottom, so the first page is the newest and the cursor walks into history.
+- The three Connections tabs are split across two modules by design: Matches and Archived are `GET /matches`; Requests is `GET /discovery/{mode}/likes-you` from Batch 7, because Requests holds profiles who liked you, not conversations (decision #5).
+- Media messages go through `claimAsset`, so a verification document cannot be promoted into a chat image. Tested directly.
+- Every closed-conversation reason answers one identical 403. A test asserts the blocker and blocked sides receive the same status, code, and message.
+- Match expiry sweep added to the daily job — bookkeeping only, since expiry is decided at read time.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -351,8 +373,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 5     | Modes and settings          | ✅     | Docker                                                       | **#9** answered                |
 | 6     | Entitlements (stub)         | ✅     | Redis                                                        | —                              |
 | 7     | Discovery and matching      | ✅     | Redis + BullMQ                                               | #6, #7, #10 — see **1.2e**     |
-| 8     | Matches and chat REST       | ▶      | Docker                                                       | #7; block visibility           |
-| 9     | Realtime                    | ⬜     | Redis. **Host must support WebSockets**                      | —                              |
+| 8     | Matches and chat REST       | ✅     | Docker                                                       | #7; block visibility           |
+| 9     | Realtime                    | ▶      | Redis. **Host must support WebSockets**                      | —                              |
 | 10    | Moderation                  | ⬜     | Moderation provider account                                  | **#8**                         |
 | 11    | Notifications               | ⬜     | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ⬜     | S3 (report evidence)                                         | Block visibility               |

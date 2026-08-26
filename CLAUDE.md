@@ -176,6 +176,15 @@ Return `404`, not `403`, when a block is the reason; a 403 confirms the resource
 - Already-swiped is scoped **per mode**. A pass in `dating` must not remove someone from the `study_buddy` deck.
 - A pass costs no quota; only likes and super likes do. One constant in `swipe.service.ts`.
 
+**Chat (spec §5.4).** A conversation belongs to exactly one match, inherits its mode, and has exactly two participants (decision #11). It is created inside the match transaction — there is no endpoint that makes one, because users cannot message before matching (decision #5).
+
+- **Messages paginate backwards.** Newest first, cursor walking into history. Every other list in this API goes the other way.
+- A conversation is closed when the pair is blocked, the match expired or was unmatched, or the other account left. **Every reason answers one identical 403** — distinguishing them lets a block be confirmed by elimination.
+- `is_writable` is returned on matches and conversations so the app hides the composer rather than learning the state from a rejected send.
+- **Match expiry is decided at read time** by `isExpired`, never by trusting the status column. The sweeper job only updates the column for admin lists; it being late must change nothing a user sees.
+- Only the recipient’s `unread_count` moves on send. A new message un-archives the thread for them.
+- Media messages go through `claimAsset` like everything else, so a verification document can never become a chat attachment.
+
 **Cursors.** Opaque base64, built and read only by `src/utils/cursor.ts`. Anything that parses a cursor elsewhere has turned it into an API surface, and the ordering key can never change again without a client release. Fetch `limit + 1` rows and let `paginate()` derive `has_more` — a COUNT over a large filtered set costs more than the page.
 
 **Jobs.** BullMQ needs its own Redis connection with `maxRetriesPerRequest: null`; its blocking commands would otherwise stall every rate-limit and quota command behind a worker poll. Nothing starts on import — tests load the Express app and must not open queues. A scheduler that fans out on the queue it feeds must branch on **job name**, or the repeatable job arrives with empty data and the worker processes it as real work.

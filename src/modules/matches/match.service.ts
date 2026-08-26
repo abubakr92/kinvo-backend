@@ -83,7 +83,24 @@ export async function createMatchIfMutual(
       // to the recipient. Either side super-liking marks the match.
       is_super_like: isSuperLike || reciprocal.action === SwipeAction.super_like,
       expires_at: matchExpiryFrom(),
+      // Decision #5: users cannot message before matching, so a conversation
+      // always has a match behind it. Creating it here rather than lazily on
+      // first message means a match can never exist without somewhere to talk,
+      // and the chat module never has to handle a missing conversation.
+      //
+      // Decision #11: exactly two participants, always — the pair on the match.
+      // Study Buddy groups are out of scope for v1.
+      conversation: {
+        create: {
+          mode,
+          // One read-state row per participant, created up front so the unread
+          // badge and archive flag have somewhere to live from the first
+          // message rather than being upserted on every send.
+          states: { create: [{ user_id: userAId }, { user_id: userBId }] },
+        },
+      },
     },
+    include: { conversation: { select: { id: true } } },
   });
 
   logger.info({ match_id: match.id, mode }, 'match created');
