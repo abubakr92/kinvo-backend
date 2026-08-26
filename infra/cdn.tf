@@ -68,9 +68,21 @@ resource "aws_cloudfront_distribution" "api" {
     custom_origin_config {
       http_port              = 80
       https_port             = 443
+      # http-only until a domain exists: a public certificate authority will not
+      # issue for a bare IP, so there is nothing for CloudFront to validate.
+      # The hop is inside AWS's network and, with the security group and the
+      # header below, reachable from nowhere else.
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
       origin_read_timeout    = 60
+    }
+
+    # Caddy rejects anything without this. See the note on
+    # random_password.origin_secret: the prefix list proves "a CloudFront", this
+    # proves "our CloudFront".
+    custom_header {
+      name  = "X-Origin-Secret"
+      value = random_password.origin_secret.result
     }
   }
 

@@ -26,11 +26,23 @@ resource "random_password" "db" {
   special = false
 }
 
+# Proves a request came from OUR CloudFront distribution.
+#
+# The security group already limits the origin to CloudFront's address ranges,
+# but those ranges belong to every CloudFront customer — anyone could point
+# their own distribution at this Elastic IP and be inside the allowed CIDRs.
+# The header is what makes it ours specifically.
+resource "random_password" "origin_secret" {
+  length  = 48
+  special = false
+}
+
 locals {
   secrets = {
     jwt_access_secret  = random_password.jwt_access.result
     jwt_refresh_secret = random_password.jwt_refresh.result
     db_password        = random_password.db.result
+    origin_secret      = random_password.origin_secret.result
   }
 }
 
@@ -102,9 +114,27 @@ resource "aws_instance" "api" {
     log_level           = var.log_level
   })
 
-  # Changing user-data replaces the instance. Explicit so a routine edit does
-  # not silently destroy a running environment without showing it in the plan.
+  # Left true so that IF the instance is ever intentionally rebuilt, it boots
+  # from the current script rather than a stale one.
   user_data_replace_on_change = true
+
+  lifecycle {
+    # user-data runs ONCE, at first boot. After that the instance is maintained
+    # by deploy.sh over SSM, so an edit here changes nothing about the running
+    # box — it only changes what a FUTURE instance would boot with.
+    #
+    # Without this, editing the bootstrap script queues a destroy-and-recreate
+    # on the next apply. Postgres and Redis run in containers on this instance
+    # with their data in local volumes, so that apply would take the database
+    # with it — and the plan says "must be replaced", not "will delete your
+    # data". Rebuilding has to be a deliberate act:
+    #
+    #     terraform apply -replace=aws_instance.api
+    #
+    # …and it must be preceded by a backup restore plan. The nightly dumps in
+    # storage.tf exist for exactly this reason.
+    ignore_changes = [user_data]
+  }
 
   tags = { Name = "${local.name}-api" }
 }

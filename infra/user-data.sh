@@ -183,13 +183,86 @@ ${domain_name} {
 }
 CADDY
 else
-  cat > "$APP_DIR/Caddyfile" <<'CADDY'
+  # Unquoted heredoc so $ORIGIN_SECRET expands. Braces are avoided throughout
+  # this file because Terraform's templatefile() consumes $${...} before the
+  # shell ever sees it.
+  ORIGIN_SECRET=$(get_secret origin_secret)
+
+  cat > "$APP_DIR/Caddyfile" <<CADDY
 :80 {
+  # Only our CloudFront distribution carries this header. The security group
+  # already limits callers to CloudFront's address ranges, but those ranges
+  # cover every CloudFront customer -- anyone could aim their own distribution
+  # at this IP and be inside the allowed CIDRs. This is what makes it ours.
+  @unauthorised not header X-Origin-Secret "$ORIGIN_SECRET"
+  respond @unauthorised 403
+
   encode gzip
   reverse_proxy api:3000
 }
 CADDY
 fi
+
+# --- backups ---------------------------------------------------------------
+# Postgres runs in a container on THIS instance with its data in a local
+# volume, so the instance is the database. Until that moves to RDS, these dumps
+# are the only recovery path from a terminated instance.
+cat > /usr/local/bin/kinvo-backup.sh <<'BACKUP'
+#!/bin/bash
+set -euo pipefail
+
+BUCKET="__MEDIA_BUCKET__"
+STAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+FILE="/tmp/kinvo-$STAMP.sql.gz"
+
+# --clean --if-exists so the dump replays into a non-empty database without
+# hand-editing, which is exactly the situation a restore happens in.
+docker exec kinvo-postgres-1 pg_dump -U kinvo -d kinvo --clean --if-exists   | gzip -9 > "$FILE"
+
+SIZE=$(stat -c%s "$FILE")
+
+# pg_dump can fail after writing a header. Uploading that would quietly replace
+# a good backup with a useless one.
+if [ "$SIZE" -lt 1000 ]; then
+  echo "backup too small ($SIZE bytes) - refusing to upload"
+  rm -f "$FILE"
+  exit 1
+fi
+
+aws s3 cp "$FILE" "s3://$BUCKET/_backups/kinvo-$STAMP.sql.gz" --region __AWS_REGION__
+rm -f "$FILE"
+echo "backup uploaded: $SIZE bytes"
+BACKUP
+
+sed -i "s|__MEDIA_BUCKET__|${media_bucket}|; s|__AWS_REGION__|${aws_region}|" /usr/local/bin/kinvo-backup.sh
+chmod +x /usr/local/bin/kinvo-backup.sh
+
+cat > /etc/systemd/system/kinvo-backup.service <<'UNIT'
+[Unit]
+Description=Kinvo database backup to S3
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kinvo-backup.sh
+UNIT
+
+cat > /etc/systemd/system/kinvo-backup.timer <<'UNIT'
+[Unit]
+Description=Nightly Kinvo database backup
+
+[Timer]
+# After the 00:10 deck-generation job, and clear of the UTC-midnight quota
+# reset when the database is busiest.
+OnCalendar=*-*-* 03:20:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now kinvo-backup.timer
 
 # --- start -----------------------------------------------------------------
 aws ecr get-login-password --region "${aws_region}" \

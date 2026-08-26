@@ -141,6 +141,15 @@ listed with what it costs to change later.
 | **Flags are idempotent per subject, and severity ratchets upward only.** | 2026-08-26 | Eng | A message scanned twice must not appear twice in the queue, and a later benign scan must never quiet an earlier serious finding. |
 | **The queue answers 403 for non-moderators, not 404.** | 2026-08-26 | Eng | Unlike a block, where 404 hides whether something exists (§4.4), an admin surface is a documented part of the API. There is nothing to conceal and a clear error is more useful. |
 
+### 1.2j Scope decisions — 2026-08-26
+
+| Decision | By | Detail |
+| --- | --- | --- |
+| **No Apple in-app purchase work at all.** | PO | The mobile team owns App Store Connect, StoreKit, and the IAP bridge. Batch 13 builds Stripe and the shared subscription lifecycle only. Sign in with Apple (Batch 2) is authentication, not payments, and stays. |
+| **Stripe and Twilio: build the functionality, credentials come later.** | PO | Both go behind provider interfaces and are exercised against mocks, the same shape as the existing Twilio stub. The PO attaches real keys when the client supplies them. |
+| **Firebase is set up live, together.** | PO | Eng stops before Batch 11 and the PO runs the Firebase CLI so the project is configured for real rather than mocked. |
+| **Apple/Play accounts are NOT a blocker for building Batch 13.** | Eng (correction) | Eng had earlier advised starting Apple enrolment urgently. That was wrong: JWS verification uses Apple's public root certificates, and the interface, webhook handlers, lifecycle, and idempotency all build and test without an account. Accounts are needed for sandbox end-to-end verification, which is normal and comes later — and are typically handed to the backend team rather than created by it. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -405,6 +414,27 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 - **`MEDIA_AUTO_APPROVE_UPLOADS` is gone**, closing the debt recorded in 1.2c. Photos now go live and are queued for human review.
 - Evasion handling split in two after a test caught the first attempt merging adjacent obfuscated words: `normalise()` rejoins letters split by punctuation only, and `compact()` strips everything for a short list of high-value terms. Collapsing spaces in `normalise` turned "w-a-l-l-e-t a-d-d-r-e-s-s" into one word and stopped it matching the phrase it plainly is.
 - Ten "ordinary message" cases assert the rules do NOT fire. A warning users learn to dismiss reflexively protects nobody, so the false-positive tests carry as much weight as the true positives.
+
+### 2026-08-26 — AWS hardening
+
+Four gaps closed before starting Batch 11. All $0.
+
+**The security group was open to the world.** Ports 80 and 443 accepted `0.0.0.0/0`, so CloudFront was a suggestion rather than a gate — anyone who found the Elastic IP reached the API directly, skipping the CDN. Port 80 is now restricted to the AWS-managed CloudFront prefix list, and 443 is only opened when a domain exists, because without one nothing listens on it.
+
+**That prefix list covers every CloudFront customer**, so it alone is not enough: someone could aim their own distribution at our IP and be inside the allowed ranges. CloudFront now sends a secret header and Caddy returns 403 without it. Prefix list proves "a CloudFront"; the header proves "our CloudFront".
+
+**Terraform state moved to S3** — versioned, encrypted, with a DynamoDB lock table. It was an 88KB file on one laptop, holding generated secrets in plaintext, and it was the only record of what exists.
+
+**Nightly database backups.** Postgres runs in a container on the API instance with its data in a local volume, so the instance *is* the database. A dump goes to `s3://…/_backups/` at 03:20 UTC, kept 14 days. A restore drill into a scratch database confirmed 53 tables, 30 users, and 3 matches came back — an untested backup is not a backup.
+
+**A landmine found on the way.** `terraform plan` wanted to REPLACE the running instance, because `user-data.sh` had been edited after launch (the `REQUIRE_THIRD_PARTY_INTEGRATIONS` line) and `user_data_replace_on_change = true`. Any `terraform apply` — including a routine one — would have destroyed the instance and the database with it, and the plan says "must be replaced", not "will delete your data". `user_data` is now under `ignore_changes` with a comment explaining that rebuilding must be deliberate (`-replace=aws_instance.api`) and preceded by a restore plan.
+
+**Two mistakes made while doing this, both mine:**
+
+- Writing the Caddyfile through an SSM `printf` mangled the newlines into literal `n`. Caddy could not parse it and crash-looped, taking staging down for about two minutes. Restored from the backup copy taken immediately before. Subsequent config changes go over base64 with a rollback built into the script.
+- The origin secret leaked into terminal output because a redacting `sed` did not match the line it was aimed at. **The secret was rotated** via `terraform apply -replace=random_password.origin_secret`.
+
+**Still open on AWS:** the CloudFront→origin hop is still HTTP. A public certificate authority will not issue for a bare IP, so real TLS there waits on a domain. Until then the hop is inside AWS's network and reachable from nowhere else, which is a mitigation rather than a fix. Postgres should move to RDS before production.
 
 ## 3. Batch plan and dependencies
 

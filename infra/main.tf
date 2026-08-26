@@ -6,9 +6,23 @@ terraform {
     random = { source = "hashicorp/random", version = "~> 3.6" }
   }
 
-  # State currently lives in this directory. Before a second person touches this
-  # stack, move it to an S3 backend with DynamoDB locking — two people running
-  # apply against local state will corrupt each other's view of what exists.
+  # State lives in S3, versioned and encrypted.
+  #
+  # Local state was a single file on one laptop: losing it means losing the only
+  # record of what exists, and Terraform would try to recreate infrastructure
+  # that is already running. It also holds generated secrets in plaintext, which
+  # is the second reason the bucket is encrypted and blocks all public access.
+  #
+  # The DynamoDB table stops two concurrent applies from corrupting state.
+  # Terraform 1.10+ can do this with S3 conditional writes and no table at all
+  # (use_lockfile); this pin is on 1.9, so the table stays until we upgrade.
+  backend "s3" {
+    bucket         = "kinvo-tfstate-48a73c26"
+    key            = "staging/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "kinvo-tfstate-lock"
+  }
 }
 
 provider "aws" {
@@ -110,23 +124,55 @@ resource "aws_security_group" "api" {
   tags = { Name = "${local.name}-api-sg" }
 }
 
-# HTTPS from anywhere. Used directly once a domain exists; until then CloudFront
-# is the only practical caller, but CloudFront egresses from a large published
-# IP range and locking to it adds a moving part for no real gain at this size.
-resource "aws_vpc_security_group_ingress_rule" "https" {
+# CloudFront's published egress ranges — an AWS-managed prefix list, so the
+# addresses stay current without anyone maintaining a CIDR list.
+data "aws_ec2_managed_prefix_list" "cloudfront" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+# HTTP from CloudFront ONLY.
+#
+# This was 0.0.0.0/0, which made CloudFront a suggestion rather than a gate:
+# anyone who found the Elastic IP reached the API directly, skipping the CDN
+# and every protection in front of it. The prefix list closes that.
+#
+# It is not sufficient on its own — the list covers ALL CloudFront
+# distributions, including strangers' — so cdn.tf also sends a secret header
+# that Caddy checks. Prefix list narrows it to CloudFront; the header narrows
+# it to OUR CloudFront.
+resource "aws_vpc_security_group_ingress_rule" "http" {
   security_group_id = aws_security_group.api.id
-  description       = "HTTPS"
+  description       = "HTTP - CloudFront origin fetch only"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront.id
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+}
+
+# HTTPS only once a domain exists.
+#
+# Without a domain nothing listens on 443 — Caddy serves plain :80 and
+# CloudFront terminates TLS — so the port was open to the internet serving
+# nothing. With a domain, Caddy needs it for its own certificate and for direct
+# callers, so the rule comes back conditionally.
+resource "aws_vpc_security_group_ingress_rule" "https" {
+  count = var.domain_name == "" ? 0 : 1
+
+  security_group_id = aws_security_group.api.id
+  description       = "HTTPS - direct callers once a domain exists"
   cidr_ipv4         = "0.0.0.0/0"
   from_port         = 443
   to_port           = 443
   ip_protocol       = "tcp"
 }
 
-# HTTP: the CloudFront origin fetch, and Caddy's ACME challenge once a domain
-# is configured. Caddy redirects browsers to HTTPS.
-resource "aws_vpc_security_group_ingress_rule" "http" {
+# ACME HTTP-01 challenge, also only relevant with a domain. Let's Encrypt
+# validates from addresses that are not published, so this cannot be narrowed.
+resource "aws_vpc_security_group_ingress_rule" "acme" {
+  count = var.domain_name == "" ? 0 : 1
+
   security_group_id = aws_security_group.api.id
-  description       = "HTTP - CloudFront origin and ACME challenge"
+  description       = "HTTP - ACME challenge"
   cidr_ipv4         = "0.0.0.0/0"
   from_port         = 80
   to_port           = 80

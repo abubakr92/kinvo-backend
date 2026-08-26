@@ -96,6 +96,25 @@ resource "aws_s3_bucket_lifecycle_configuration" "media" {
     # A presigned upload the client abandoned halfway leaves billable parts.
     abort_incomplete_multipart_upload { days_after_initiation = 1 }
   }
+
+  # Nightly database dumps.
+  #
+  # Postgres runs in a container on the API instance with its data in a local
+  # volume, so losing the instance loses the database. Until it moves to RDS,
+  # these dumps are the only thing standing between a terminated instance and
+  # starting over — including every account the mobile team has set up.
+  #
+  # Fourteen days is enough to notice corruption that was not obvious on the
+  # day it happened, and cheap: a dump of this database is measured in
+  # kilobytes.
+  rule {
+    id     = "expire-database-backups"
+    status = "Enabled"
+
+    filter { prefix = "_backups/" }
+
+    expiration { days = 14 }
+  }
 }
 
 # CORS so the mobile client can PUT straight to the presigned URL. Without this
