@@ -1,4 +1,9 @@
 import { SubscriptionTier, prisma } from '@/db/prisma';
+import {
+  ALL_ENTITLEMENT_KEYS,
+  type EntitlementKey,
+  FLAG_VALUE_TYPES,
+} from '@modules/entitlements/entitlements.types';
 
 /**
  * The entitlement matrix (spec §5.11).
@@ -19,7 +24,12 @@ import { SubscriptionTier, prisma } from '@/db/prisma';
 const UNLIMITED = -1;
 
 interface FlagSeed {
-  key: string;
+  /**
+   * Typed against the resolver's vocabulary so a typo here is a compile error
+   * rather than a flag that silently resolves to its fail-closed default in
+   * production.
+   */
+  key: EntitlementKey;
   label: string;
   description: string;
   value_type: 'boolean' | 'number';
@@ -143,7 +153,22 @@ const FLAGS: FlagSeed[] = [
 ];
 
 export async function seedEntitlements(): Promise<{ flags: number; provisional: number }> {
+  // A key declared in the vocabulary but never seeded resolves to its
+  // fail-closed default for every user — a feature that is simply off, with no
+  // error anywhere. Far cheaper to fail the seed.
+  const seeded = new Set<string>(FLAGS.map((flag) => flag.key));
+  const missing = ALL_ENTITLEMENT_KEYS.filter((key) => !seeded.has(key));
+  if (missing.length > 0) {
+    throw new Error(`Entitlement flags declared but not seeded: ${missing.join(', ')}`);
+  }
+
   for (const flag of FLAGS) {
+    if (flag.value_type !== FLAG_VALUE_TYPES[flag.key]) {
+      throw new Error(
+        `Flag ${flag.key} is seeded as ${flag.value_type} but declared as ${FLAG_VALUE_TYPES[flag.key]}`,
+      );
+    }
+
     const record = await prisma.entitlementFlag.upsert({
       where: { key: flag.key },
       create: {

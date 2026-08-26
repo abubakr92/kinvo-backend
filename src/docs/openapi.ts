@@ -452,6 +452,17 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.VALIDATION_FAILED, E.CONFLICT, E.NOT_FOUND, E.BAD_REQUEST],
   },
+  // --- entitlements -------------------------------------------------------
+  {
+    method: 'get',
+    path: '/me/entitlements',
+    tag: 'Entitlements',
+    summary: 'What this user’s plan includes',
+    description:
+      'The whole plan in one call: every feature flag, every daily quota with what is left of it, and the tier. Render paywalls and remaining-swipe counters from this rather than inferring them from 403s and 422s. Numeric values of -1 mean unlimited. Quotas reset at UTC midnight, given exactly by `resets_at`.',
+    auth: true,
+    errors: [],
+  },
   // --- modes --------------------------------------------------------------
   {
     method: 'get',
@@ -789,6 +800,10 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       { name: 'Profile', description: 'Profile content and public views' },
       { name: 'Media', description: 'Uploads, photos' },
       { name: 'Verification', description: 'Identity verification' },
+      {
+        name: 'Entitlements',
+        description: 'Plan features and daily quotas',
+      },
       { name: 'Modes', description: 'The eight connection modes and their per-mode preferences' },
       { name: 'Settings', description: 'Appearance, privacy, snooze, connected devices' },
     ],

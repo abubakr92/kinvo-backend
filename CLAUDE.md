@@ -146,6 +146,18 @@ Never widen `req.user` from a token claim. `authenticate` loads the user on ever
 
 **Quota vs rate limit.** Infrastructure protection → `429 RATE_LIMITED`. Business limits that sell subscriptions → `422 QUOTA_EXCEEDED` with paywall context. Conflating them hides the paywall and costs revenue.
 
+**Entitlements (spec §5.11).** The tier→flag matrix is **data**. Nothing branches on a tier name — not in this module, not anywhere downstream. Moving a feature between tiers is a seed edit and a re-seed.
+
+- Flag keys live in `entitlements.types.ts` and are imported by both the seed and the resolver, so a typo is a compile error rather than a flag that is silently always off.
+- `resolve(userId)` returns every flag in one call. Callers needing several flags resolve once — the same N+1 rule as compact objects.
+- A missing or wrongly typed row **fails closed**. A broken seed must never hand out a paid feature.
+- The **matrix** is cached 60s in process. The **user's tier is never cached** — it changes the moment a payment clears, and a stale tier tells a paying customer to upgrade.
+- `requireEntitlement(flag)` middleware gates **boolean** features only. Numeric caps are consumed inside the service transaction that performs the action, so `refundQuota` can give the allowance back when that action fails. Never charge a user for a swipe the database rejected.
+- Quota counters are keyed `quota:{name}:{user}:{utc-day}` and expire at the next **UTC** midnight. Check-and-consume is one Lua script; GET-then-INCR lets concurrent requests burst past the cap.
+- Quotas **fail open** when Redis is down. They bind only the free tier, so failing closed would trade a total outage for revenue nobody is paying.
+
+**Redis in tests.** The client uses `lazyConnect` with the offline queue **disabled** under test, so a command issued before an explicit `connectRedis()` fails instead of buffering. Any suite touching quota counters must call it in `beforeAll` and `disconnectRedis()` in `afterAll`. Skipping it does not fail loudly — `readCount` swallows connection errors and reports zero used, which looks exactly like a fresh counter, so the suite passes while proving nothing. Never wrap a live Redis call in `jest.useFakeTimers()`: ioredis drives its command queue on real timers and the call never resolves.
+
 **Blocks (spec 5.5).** Blocks beat everything. The shared exclusion clause lives in `src/modules/safety/block.service.ts` and **must never be re-implemented**:
 
 - `visibleUserFilter(viewerId, blockedIds)` — compose into the `where` of any query that can surface another user. It already excludes blocked-either-direction, self, suspended, soft-deleted, and snoozed.

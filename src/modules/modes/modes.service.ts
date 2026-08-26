@@ -5,6 +5,8 @@ import { ERROR_CODES } from '@utils/error-codes';
 import { logger } from '@utils/logger';
 import { preferenceSchemaFor } from './mode-preferences.schema';
 import type { ModeView, ModesResponse } from './modes.types';
+import * as entitlementsService from '@modules/entitlements/entitlements.service';
+import { ENTITLEMENT_KEYS } from '@modules/entitlements/entitlements.types';
 
 /**
  * The eight modes (spec §1, §5.2).
@@ -122,22 +124,9 @@ export async function getMode(userId: string, mode: Mode): Promise<ModeView> {
  * must be a seed change, never a code change. -1 means unlimited.
  */
 export async function getMaxModes(userId: string): Promise<number> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { subscription_tier: true },
-  });
-
-  if (!user) {
-    throw ApiError.notFound();
-  }
-
-  const entitlement = await prisma.tierEntitlement.findFirst({
-    where: { tier: user.subscription_tier, flag: { key: 'max_simultaneous_modes' } },
-    select: { value: true },
-  });
-
-  const value = entitlement?.value;
-  return typeof value === 'number' ? value : 1;
+  // Batch 5 read the matrix directly because the resolver did not exist yet.
+  // Batch 6 owns that read; two places interpreting the same rows would drift.
+  return entitlementsService.getLimit(userId, ENTITLEMENT_KEYS.MAX_SIMULTANEOUS_MODES);
 }
 
 export interface UpdateModeInput {

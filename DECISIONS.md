@@ -60,6 +60,36 @@ Roles below: **PO** = product owner (Abubakr). **Eng** = the implementing agent.
 | **Staging waives third-party integrations** via `REQUIRE_THIRD_PARTY_INTEGRATIONS=false`. | 2026-08-25 | Eng | No Twilio, Google, or Apple accounts exist yet. Production still refuses to boot without them. The waiver deliberately does not relax the CORS or media-moderation rules, and a test asserts it cannot. **Must become true before real users sign in.** |
 | **API documentation is served at `/docs`**, brought forward from Batch 15. | 2026-08-26 | PO | The mobile team needed the contract. Request bodies generate from the Zod schemas the endpoints validate with, and a test fails the build if a route is undocumented. |
 
+### 1.2d Resolved during Batch 6 (entitlements)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **The entitlement matrix stays data; no code branches on a tier name.** | 2026-08-26 | Eng | Spec §5.11 requires it, and it is what lets #2, #3, #7 and #10 be answered after launch. A test proves it: flipping Rewind on for free is a seeded row edit, and the endpoint reports the change with no deploy. |
+| **A missing or wrongly typed flag fails CLOSED** (boolean → false, number → 0). | 2026-08-26 | Eng | A broken seed must never hand out a premium feature or an unlimited quota. Closed is loud — someone reports the feature missing within the hour. Open is silent and leaks revenue indefinitely. The seed additionally refuses to run if a declared key has no row. |
+| **The matrix is cached in process for 60s; the user’s TIER IS NEVER CACHED.** | 2026-08-26 | Eng | The matrix is global and changes quarterly. A tier changes the instant a payment clears, and a stale tier tells someone who just paid to upgrade — the worst bug this module could have. Same reasoning as `authenticate` reloading the user rather than trusting a token claim. |
+| **Quota counters fail OPEN when Redis is unreachable.** | 2026-08-26 | Eng | Quotas bind only the free tier; paid tiers are unlimited and never reach the counter. Failing closed turns a cache outage into "nobody can swipe or send a message" — a total outage to protect revenue from users who are not paying. Logged at error level so the outage is still visible. |
+| **Check-and-consume is a single Lua script, not GET-then-INCR.** | 2026-08-26 | Eng | Two concurrent requests both read "49 of 50" and both proceed otherwise. The limit that is supposed to sell a subscription would be quietly exceedable by anyone tapping fast. A test fires 20 concurrent consumes at a cap of 5 and asserts exactly 5 succeed. |
+| **Numeric caps are consumed in the service, not in middleware.** | 2026-08-26 | Eng | A daily cap must be spent inside the transaction that performs the action so it can be refunded when that action fails — otherwise a user is charged a swipe the database rejected. Middleware cannot see that far. `requireEntitlement` therefore gates boolean features only. |
+| **The mode cap now reads the resolver** rather than querying the matrix itself. | 2026-08-26 | Eng | Batch 5 read `tier_entitlements` directly because the resolver did not exist. Two places interpreting the same rows drift; the Batch 5 copy is gone. |
+| **Tests seed the REAL matrix**, via production’s own seed function. | 2026-08-26 | Eng | Batch 5’s mode tests hand-built a one-row stub, which proves the resolver works against fixtures nobody ships. Calling the real seed means a broken matrix fails the suite instead of surfacing in staging. |
+
+### 1.2e Provisional answers taken under autonomous execution
+
+On 2026-08-26 the PO authorised running Batches 6→10 without stopping between
+them, accepting that the open decisions below would be answered with documented
+defaults. **These are engineering placeholders, not PO decisions.** Each is
+listed with what it costs to change later.
+
+| # | Question | Placeholder | Cost to change |
+| --- | --- | --- | --- |
+| 7 | Free daily swipe cap | **50/day** | Seed edit + re-seed. Free. |
+| 7 | Free daily message cap | **30/day** | Seed edit + re-seed. Free. |
+| 10 | Rewind free or premium | **Premium (basic and above)** | Seed edit + re-seed. Free. |
+| 6 | Match expiry TTL | **14 days** | Config constant. Cheap. |
+| 6 | What expiry does to the conversation | **Read-only, stays visible** | **Code.** Affects the chat query and the match list. |
+| — | Block visibility | **Conversation frozen and visible; 404 on every other path** | **Code.** Affects the shared exclusion clause and the chat module. |
+| 8 | Moderation provider | **Rules-based v1, behind a provider interface** | Provider swap. Cheap by design. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -277,6 +307,15 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 - Per-mode preference validation: one Zod schema per mode, `.strict()`, so `pet_type` on `dating` is rejected rather than stored where it would become a filter matching nobody.
 - **Security bug found by its own test: "revoke device" did not revoke.** The Device row recorded the id from the header or body; the refresh token recorded only the body. Signing in with `X-Device-Id` made them disagree, so the revoke matched no tokens, returned 200, and left the session alive. One resolved id now flows to both.
 
+### 2026-08-26 — Batch 6: Entitlements
+
+- `GET /me/entitlements` returns the whole plan in one call: every flag, every quota with what is left of it, the tier, and whether an upgrade exists. The app renders paywalls and remaining-swipe counters from this rather than inferring them from 403s and 422s.
+- `EntitlementService.resolve` / `hasFeature` / `getLimit` / `requireFeature`; `requireEntitlement(flag)` middleware.
+- Redis quota counters keyed `quota:{name}:{user}:{utc-day}`, TTL to the next UTC midnight, so yesterday expires on its own and no sweeper job is needed.
+- **Found a false green in my own new tests.** The endpoint suite passed while Redis was never connected: `readCount` swallows connection errors and reports zero used, which is indistinguishable from a fresh counter. The suite proved nothing. Redis is now connected explicitly in `beforeAll`, and the helper documents why skipping it does not fail loudly.
+- Avoided a second trap: `jest.useFakeTimers()` around a live Redis call deadlocks, because ioredis drives its command queue on real timers. The UTC-day test writes yesterday’s key directly instead.
+- Batch 5’s duplicate matrix read in `modes.service` deleted.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -287,11 +326,11 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 1     | Database schema             | ✅     | **Docker** (Postgres + PostGIS, Redis)                       | — (#2/#3 seeded provisionally) |
 | 2     | Auth                        | ✅     | Docker. Twilio Verify (mocked in tests)                      | —                              |
 | 3     | Users, profiles, onboarding | ✅     | Docker                                                       | —                              |
-| **—** | **Deployment interlude**    | ⬜     | **AWS account + IAM user, AWS CLI, Terraform, domain name**  | —                              |
+| **—** | **Deployment interlude**    | ✅     | **AWS account + IAM user, AWS CLI, Terraform, domain name**  | —                              |
 | 4     | Media and verification      | ✅     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |
-| 5     | Modes and settings          | ▶      | Docker                                                       | **#9**                         |
-| 6     | Entitlements (stub)         | ⬜     | Redis                                                        | —                              |
-| 7     | Discovery and matching      | ⬜     | Redis + BullMQ                                               | **#6, #7, #10**                |
+| 5     | Modes and settings          | ✅     | Docker                                                       | **#9** answered                |
+| 6     | Entitlements (stub)         | ✅     | Redis                                                        | —                              |
+| 7     | Discovery and matching      | ▶      | Redis + BullMQ                                               | #6, #7, #10 — see **1.2e**     |
 | 8     | Matches and chat REST       | ⬜     | Docker                                                       | #7; block visibility           |
 | 9     | Realtime                    | ⬜     | Redis. **Host must support WebSockets**                      | —                              |
 | 10    | Moderation                  | ⬜     | Moderation provider account                                  | **#8**                         |
