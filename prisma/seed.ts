@@ -1,5 +1,6 @@
 import { disconnectDatabase, prisma } from '@/db/prisma';
 import { seedCatalogues } from './seeds/catalogues';
+import { seedConnections } from './seeds/connections';
 import { seedEntitlements } from './seeds/entitlements';
 import { seedProducts } from './seeds/products';
 import { DEV_PASSWORD, seedUsers } from './seeds/users';
@@ -41,6 +42,13 @@ async function main(): Promise<void> {
 
   const users = await seedUsers();
   console.log(`  users          ${users.users} dev users with profiles, modes, and interests`);
+
+  // Last: needs users with modes enabled, and goes through the real match
+  // path so the conversation and its state rows come with it.
+  const connections = await seedConnections();
+  console.log(
+    `  connections    ${connections.matches} matches with conversations, ${connections.messages} messages`,
+  );
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`\nDone in ${elapsed}s.`);
