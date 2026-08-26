@@ -12,6 +12,7 @@ import { type BucketName, presignDownload } from '@/providers/s3.provider';
 import { getPrimaryPhotoUrlsFor } from '@modules/media/photos.service';
 import { getBlockedUserIds, isBlockedBetween } from '@modules/safety/block.service';
 import { isExpired, otherUserId } from '@modules/matches/matches.service';
+import { scanSubject } from '@modules/moderation/moderation.service';
 import { otherParticipantId } from '@/realtime/participants';
 import { onlineStatusFor } from '@/realtime/presence';
 import { ApiError } from '@utils/api-error';
@@ -462,6 +463,28 @@ export async function sendMessage(
 
       return created;
     });
+
+    // POST-HOC SCAN (spec §7, Batch 10). After the write and outside the
+    // transaction: moderation is advisory, so a scan failing must never cost a
+    // user their message. A pre-send check is offered separately at
+    // POST /moderation/check — this catches what was sent regardless of whether
+    // the client bothered to call it, including anything sent while the
+    // provider was down.
+    if (input.type === 'text' && input.body) {
+      const severity = await scanSubject({
+        userId: viewerId,
+        subjectType: 'message',
+        subjectId: message.id,
+        content: input.body,
+      });
+
+      if (severity !== 'none') {
+        await prisma.message.update({
+          where: { id: message.id },
+          data: { moderation_flagged: true },
+        });
+      }
+    }
 
     const view = await toMessageView(message);
 

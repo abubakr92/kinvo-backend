@@ -8,6 +8,7 @@ import * as mediaSchema from '@modules/media/media.schema';
 import * as modesSchema from '@modules/modes/modes.schema';
 import { swipeBodySchema } from '@modules/discovery/discovery.schema';
 import { sendMessageSchema, updateConversationSchema } from '@modules/chat/chat.schema';
+import { checkContentSchema, resolveFlagSchema } from '@modules/moderation/moderation.schema';
 import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
@@ -628,6 +629,39 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
   },
+  // --- moderation ---------------------------------------------------------
+  {
+    method: 'post',
+    path: '/moderation/check',
+    tag: 'Moderation',
+    summary: 'Check content before sending',
+    description:
+      '**Advisory, never blocking.** `can_send` is always true, at every severity — show "Edit message" / "Send anyway" from `should_warn` and let the user decide. Send `overridden: true` when they push past a warning; that record is what the moderation team needs later. Content is hashed, never stored. If the provider is unreachable the call still succeeds with `timed_out: true` and severity `none`: a third-party outage must never cost a user their message. Scam and payment checks run on every mode, not just dating.',
+    body: checkContentSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/moderation/flags',
+    tag: 'Moderation',
+    summary: 'The moderation queue',
+    description:
+      'System-raised flags, distinct from user reports. Moderator or admin only — answers 403, not 404, because an admin surface is documented and there is nothing to conceal about its existence.',
+    auth: true,
+    errors: [E.FORBIDDEN, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'patch',
+    path: '/moderation/flags/{id}',
+    tag: 'Moderation',
+    summary: 'Resolve a flag',
+    description:
+      'Moves a flag to under_review, actioned, or dismissed, and records the moderator. Moderator or admin only.',
+    body: resolveFlagSchema,
+    auth: true,
+    errors: [E.FORBIDDEN, E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
   // --- entitlements -------------------------------------------------------
   {
     method: 'get',
@@ -979,6 +1013,10 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       { name: 'Discovery', description: 'Decks, swipes, matches forming, boosts' },
       { name: 'Matches', description: 'The Matches and Archived tabs, unmatch, extend' },
       { name: 'Chat', description: 'Conversations, messages, read state' },
+      {
+        name: 'Moderation',
+        description: 'Pre-send checks and the moderation queue',
+      },
       {
         name: 'Entitlements',
         description: 'Plan features and daily quotas',

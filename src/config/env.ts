@@ -131,24 +131,6 @@ export const envSchema = z.object({
   S3_VERIFICATION_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
 
   /**
-   * Approve uploaded media on arrival instead of leaving it pending.
-   *
-   * spec §4.8 says media pending moderation is visible to its owner and nobody
-   * else — correct, but nothing moves a photo from pending to approved until
-   * the moderation pipeline arrives in Batch 10. Without this switch every
-   * uploaded photo would be invisible to everyone, and no deck card would ever
-   * render an image.
-   *
-   * So it defaults on for development and staging and is FORCED OFF in
-   * production by the refinement below, the same shape as the Twilio dev stub:
-   * useful locally, impossible to ship. Batch 10 removes it entirely.
-   */
-  MEDIA_AUTO_APPROVE_UPLOADS: z
-    .string()
-    .default('true')
-    .transform((value) => value === 'true'),
-
-  /**
    * Whether Twilio, Google, and Apple credentials must be present in production.
    *
    * Defaults true, and must stay true anywhere real users sign in: without it,
@@ -262,13 +244,6 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     // web console arrives later and this is the moment to refuse it.
     if (result.data.CORS_ORIGINS.includes('*')) {
       issues.CORS_ORIGINS = ['must list explicit origins in production, not "*"'];
-    }
-
-    // Shipping unmoderated user photos is a safety incident waiting to happen.
-    if (result.data.MEDIA_AUTO_APPROVE_UPLOADS) {
-      issues.MEDIA_AUTO_APPROVE_UPLOADS = [
-        'must be false in production — media cannot bypass moderation',
-      ];
     }
   }
 

@@ -20,7 +20,6 @@ const PRODUCTION_CREDENTIALS: NodeJS.ProcessEnv = {
   S3_ACCESS_KEY_ID: 'AKIAEXAMPLE',
   S3_SECRET_ACCESS_KEY: 'example-secret',
   // Defaults on for development; production refuses it. See the test below.
-  MEDIA_AUTO_APPROVE_UPLOADS: 'false',
 };
 
 describe('environment validation (spec 7, Batch 0)', () => {
@@ -129,23 +128,6 @@ describe('environment validation (spec 7, Batch 0)', () => {
     expect(() => parseEnv({ ...VALID, CORS_ORIGINS: '*' })).not.toThrow();
   });
 
-  it('refuses to auto-approve media in production', () => {
-    // Shipping unmoderated user photos is a safety incident waiting to happen.
-    // The switch exists only because nothing approves a photo until Batch 10.
-    expect(() =>
-      parseEnv({
-        ...VALID,
-        ...PRODUCTION_CREDENTIALS,
-        NODE_ENV: 'production',
-        MEDIA_AUTO_APPROVE_UPLOADS: 'true',
-      }),
-    ).toThrow(EnvValidationError);
-
-    // Still allowed in development, where there is no moderation pipeline yet
-    // and an invisible photo would just look like a broken app.
-    expect(() => parseEnv({ ...VALID, MEDIA_AUTO_APPROVE_UPLOADS: 'true' })).not.toThrow();
-  });
-
   it('does NOT demand static S3 credentials in production', () => {
     // On AWS the instance supplies credentials through its IAM role, so there
     // are no static keys to set. Requiring them would force a long-lived secret
@@ -169,7 +151,6 @@ describe('environment validation (spec 7, Batch 0)', () => {
       ...VALID,
       NODE_ENV: 'production',
       CORS_ORIGINS: 'https://admin.kinvo.app',
-      MEDIA_AUTO_APPROVE_UPLOADS: 'false',
     };
 
     // Default: production refuses to boot without them, so OTP and social
@@ -201,7 +182,6 @@ describe('environment validation (spec 7, Batch 0)', () => {
         ...VALID,
         NODE_ENV: 'production',
         REQUIRE_THIRD_PARTY_INTEGRATIONS: 'false',
-        MEDIA_AUTO_APPROVE_UPLOADS: 'true',
       }),
     ).toThrow(EnvValidationError);
   });

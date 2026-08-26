@@ -127,6 +127,20 @@ listed with what it costs to change later.
 | **The socket contract is its own document at `/docs/realtime.json`.** | 2026-08-26 | Eng | OpenAPI has no vocabulary for socket events. Generated from the same Zod schemas the server validates against, so the document cannot describe a payload the server would reject, and a drift test fails the build on an undocumented event. |
 | **The socket shares the HTTP server and port.** | 2026-08-26 | Eng | A separate port needs its own load-balancer rule and its own certificate. Riding the same server means realtime inherits the TLS termination and CORS policy the REST API already has. |
 
+### 1.2i Resolved during Batch 10 (moderation)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **#8 answered: rules-based v1**, behind a `ModerationProvider` interface. | 2026-08-26 | Eng (placeholder — see 1.2e) | No account and no key, so it cannot become the thing blocking a launch. No per-call cost, so it runs on every message rather than being rationed. And it does not send users’ private messages to a third party, which for a dating app is a real privacy property rather than a cost saving. It is worse at nuance than a model and is meant to be replaced — that is what the interface is for. |
+| **The check is advisory at every severity.** `can_send` is a constant `true`. | 2026-08-26 | Eng | Spec §5.4. It is written as a constant deliberately: the day it becomes conditional, the product has started blocking messages on a regex. |
+| **Fail open, everywhere.** | 2026-08-26 | Eng | A provider outage returns `timed_out: true`, severity `none`, and queues the content for review. Blocking a user’s message on a third party’s outage is a worse failure than reviewing it late. The message send path fails open too, not just the check endpoint. |
+| **Checked content is hashed, never stored.** | 2026-08-26 | Eng | The row has to be linkable so a moderator can tell two reports about the same text apart. Keeping a copy of every message a user *considered* sending — including the ones they edited away — is a surveillance database nobody asked for. |
+| **Scam and payment rules take no mode argument at all.** | 2026-08-26 | Eng | Spec §1 requires these checks to be global rather than dating-scoped, because Trading attracts investment fraud. Making the function unable to accept a mode is stronger than remembering not to pass one. |
+| **`MEDIA_AUTO_APPROVE_UPLOADS` deleted**, as promised in 1.2c. | 2026-08-26 | Eng | Replaced by the real pipeline: photos go live on upload and are queued for post-hoc human review (spec §7 asks for a "post-hoc scanning queue"). Every photo pending a moderator would mean nobody can finish onboarding until one is awake. |
+| **A provider that cannot assess a subject queues it rather than passing it.** | 2026-08-26 | Eng | Rules read words and cannot look at pixels. Claiming image support would mark every photo clean and leave a queue that looks healthy while nothing is checked — worse than admitting the gap. |
+| **Flags are idempotent per subject, and severity ratchets upward only.** | 2026-08-26 | Eng | A message scanned twice must not appear twice in the queue, and a later benign scan must never quiet an earlier serious finding. |
+| **The queue answers 403 for non-moderators, not 404.** | 2026-08-26 | Eng | Unlike a block, where 404 hides whether something exists (§4.4), an admin surface is a documented part of the API. There is nothing to conceal and a clear error is more useful. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -135,7 +149,6 @@ listed with what it costs to change later.
 | 7   | Free-tier daily swipe cap and message cap — numbers?                                                       | 7, 8           | Counter resets at UTC midnight (spec §5.3).                                                                                                                                  |
 | 10  | Is Rewind free or premium?                                                                                 | 7              |                                                                                                                                                                              |
 | —   | **Block visibility:** does a blocked pair's conversation stay visible read-only, or disappear entirely?    | 8, 12          | Spec §5.5 says read-only; spec §4.4 says return 404 so a block is not confirmed. These contradict. Eng recommends: conversation visible and frozen, 404 on every other path. |
-| 8   | Moderation provider for "review before you send" — OpenAI, AWS Comprehend, Perspective, or rules-based v1? | 10             | Must fail open on timeout (spec §5.4).                                                                                                                                       |
 | —   | **Profile photo URLs:** CDN signed URLs vs expiring S3 presigned GETs.                                     | 4              | Presigned GETs expire and are unique per request, so Flutter's image cache misses on every render. Eng recommends CDN for photos, short presigned GETs for ID documents.     |
 | —   | **Cloudflare R2 instead of S3** for media bytes?                                                           | 4              | Identical API, no egress charges. For a photo-heavy app, egress is the fastest-growing line on the bill. Same SDK code, different endpoint.                                  |
 | 2   | Basic vs Advanced Premium — which features in which tier?                                                  | 13 (seed at 1) | Batch 1 seeds a **provisional** matrix with documented defaults. Because the matrix is data, filling these in later is a seed change, never a code change.                   |
@@ -384,6 +397,15 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 - **Every expired token read as INVALID.** The handshake caught `TokenExpiredError`, but `verifyAccessToken` had already mapped it to an `ApiError` — so the catch never matched. The app signs the user out on INVALID and refreshes on EXPIRED, so this turned every routine 30-minute expiry into a forced sign-out. Now reuses the existing mapping instead of repeating it.
 - Typing indicators depended on a room join the sender could not observe; switched to addressing the other participant directly.
 
+### 2026-08-26 — Batch 10: Moderation
+
+- 3 endpoints: `POST /moderation/check` (pre-send, advisory), `GET /moderation/flags` and `PATCH /moderation/flags/{id}` (the moderation queue, moderator/admin only).
+- Rules-based provider with 15 rules across 7 categories: scam/payment, contact info, sexual content, hate speech, threats, self-harm, minor safety.
+- Post-hoc scanning wired into message send and photo upload. The pre-send check is offered, never required — what was actually sent is scanned regardless of whether the client called it.
+- **`MEDIA_AUTO_APPROVE_UPLOADS` is gone**, closing the debt recorded in 1.2c. Photos now go live and are queued for human review.
+- Evasion handling split in two after a test caught the first attempt merging adjacent obfuscated words: `normalise()` rejoins letters split by punctuation only, and `compact()` strips everything for a short list of high-value terms. Collapsing spaces in `normalise` turned "w-a-l-l-e-t a-d-d-r-e-s-s" into one word and stopped it matching the phrase it plainly is.
+- Ten "ordinary message" cases assert the rules do NOT fire. A warning users learn to dismiss reflexively protects nobody, so the false-positive tests carry as much weight as the true positives.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -401,8 +423,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 7     | Discovery and matching      | ✅     | Redis + BullMQ                                               | #6, #7, #10 — see **1.2e**     |
 | 8     | Matches and chat REST       | ✅     | Docker                                                       | #7; block visibility           |
 | 9     | Realtime                    | ✅     | Redis. **Host must support WebSockets**                      | —                              |
-| 10    | Moderation                  | ⬜     | Moderation provider account                                  | **#8**                         |
-| 11    | Notifications               | ⬜     | **Firebase project + service account, SMTP credentials**     | —                              |
+| 10    | Moderation                  | ✅     | Moderation provider account                                  | **#8**                         |
+| 11    | Notifications               | ▶      | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ⬜     | S3 (report evidence)                                         | Block visibility               |
 | 13    | Subscriptions               | ⬜     | **Apple Developer + App Store Connect, Google Play Console** | **#2, #3, #14**, RevenueCat    |
 | 14    | Video calling               | ⬜     | **Twilio Video credentials**                                 | —                              |

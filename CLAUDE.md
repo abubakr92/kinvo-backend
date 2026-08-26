@@ -202,6 +202,19 @@ Return `404`, not `403`, when a block is the reason; a 403 confirms the resource
 
 **Onboarding.** The requirement list is a declared checklist in `src/modules/users/onboarding.service.ts`. Adding a requirement is one entry there — never a new condition scattered into the transition. Batch 4 adds "≥1 approved photo", Batch 5 adds "≥1 enabled mode".
 
+**Moderation (spec §5.4).** Rules-based v1 behind `ModerationProvider` (decision #8). Two rules govern the whole module:
+
+- **Advisory, never blocking.** `can_send` is a constant `true`. If it ever becomes conditional, the product has started blocking messages on a regex.
+- **Fail open.** A provider timeout returns severity `none` with `timed_out: true` and queues the content. This applies to the send path too, not just the check endpoint — never cost a user their message because a third party was down.
+
+Also:
+
+- Checked content is **hashed, never stored**. A copy of every message someone considered sending is a surveillance database.
+- Scam and payment rules **take no mode argument**, so they cannot be dating-scoped by accident (spec §1 — Trading attracts investment fraud).
+- A provider that cannot assess a subject type **queues it for a human** rather than marking it clean. A healthy-looking queue that checks nothing is worse than no queue.
+- Flags are idempotent per subject and severity **ratchets upward only** — a later benign scan must not quiet an earlier serious finding.
+- False-positive tests matter as much as true-positive ones. A warning users dismiss reflexively protects nobody.
+
 **Reporter anonymity (spec 5.7).** A reported user must never learn who reported them through any endpoint, notification, or error message.
 
 **Logging.** Pino only — `no-console` is an ESLint error. No PII in logs; redaction lives in `src/utils/logger.ts`. Log `req.path`, never `req.originalUrl`.

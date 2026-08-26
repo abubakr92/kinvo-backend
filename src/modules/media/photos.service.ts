@@ -1,6 +1,7 @@
 import { MediaKind, ModerationStatus, prisma } from '@/db/prisma';
-import { env } from '@config/env';
+
 import { deleteObject, presignDownload, type BucketName } from '@/providers/s3.provider';
+import { scanSubject } from '@modules/moderation/moderation.service';
 import { ensureProfile } from '@modules/profiles/profile.repository';
 import { refreshCompletion } from '@modules/profiles/completion.service';
 import { ApiError } from '@utils/api-error';
@@ -118,14 +119,26 @@ export async function addPhoto(userId: string, input: AddPhotoInput): Promise<Ph
       size_bytes: asset.size_bytes,
       width: input.width ?? null,
       height: input.height ?? null,
-      // spec §4.8: pending media is visible to its owner and nobody else.
-      // Nothing approves a photo until Batch 10 builds the moderation pipeline,
-      // so outside production the switch lets development and staging see
-      // images. It cannot be enabled in production — env validation refuses.
-      moderation_status: env.MEDIA_AUTO_APPROVE_UPLOADS
-        ? ModerationStatus.approved
-        : ModerationStatus.pending,
+      // Photos go live and are reviewed AFTER the fact (spec §7, Batch 10:
+      // "post-hoc scanning queue"). The alternative — every photo pending until
+      // a human looks — means nobody can finish onboarding until a moderator is
+      // awake, which is not a product.
+      //
+      // The safety net is the flag raised below: rules-based v1 cannot read
+      // pixels, so every photo is queued for a person rather than quietly
+      // marked clean. A moderator rejecting one hides it immediately.
+      moderation_status: ModerationStatus.approved,
     },
+  });
+
+  // Queued for human review. Deliberately after the photo exists and outside
+  // any transaction: a moderation queue failing must never cost a user their
+  // upload.
+  await scanSubject({
+    userId,
+    subjectType: 'photo',
+    subjectId: photo.id,
+    content: null,
   });
 
   // Photos are a scored criterion, so the stored percentage would otherwise go
