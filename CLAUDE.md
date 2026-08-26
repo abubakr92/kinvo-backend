@@ -167,6 +167,19 @@ Return `404`, not `403`, when a block is the reason; a 403 confirms the resource
 
 **Compact objects (spec 4.7).** `user_compact` is built only by `toUserCompact()` in `src/utils/compact.ts`. It becomes one Dart model, so every list that returns a user returns exactly that shape.
 
+**Discovery (spec §5.3).** The deck is where six rules must hold at once — blocks, mode, radius, age, already-swiped, account state. Any one failing surfaces someone who should never have been shown.
+
+- Decks are persisted per `(user, mode, day)`. Re-running a ranking algorithm per scroll lets a card move between pages and be seen twice or never.
+- `getDeck` generates lazily when today’s deck is missing. The BullMQ precompute is an **optimisation, never a dependency** — a worker that is down must cost latency, not an empty product.
+- **Ranking is not filtering.** Verification and boost move someone up a deck they already qualified for. Neither may place someone into a deck a filter excluded them from — that is how a paid boost would beat a block.
+- The radius query cannot compose `visibleUserFilter`, so it takes an exclusion array and the shared clause runs on its result in Prisma. `CANDIDATE_POOL` stays far above `DECK_SIZE` so the split cannot truncate a correct answer.
+- Already-swiped is scoped **per mode**. A pass in `dating` must not remove someone from the `study_buddy` deck.
+- A pass costs no quota; only likes and super likes do. One constant in `swipe.service.ts`.
+
+**Cursors.** Opaque base64, built and read only by `src/utils/cursor.ts`. Anything that parses a cursor elsewhere has turned it into an API surface, and the ordering key can never change again without a client release. Fetch `limit + 1` rows and let `paginate()` derive `has_more` — a COUNT over a large filtered set costs more than the page.
+
+**Jobs.** BullMQ needs its own Redis connection with `maxRetriesPerRequest: null`; its blocking commands would otherwise stall every rate-limit and quota command behind a worker poll. Nothing starts on import — tests load the Express app and must not open queues. A scheduler that fans out on the queue it feeds must branch on **job name**, or the repeatable job arrives with empty data and the worker processes it as real work.
+
 **Onboarding.** The requirement list is a declared checklist in `src/modules/users/onboarding.service.ts`. Adding a requirement is one entry there — never a new condition scattered into the transition. Batch 4 adds "≥1 approved photo", Batch 5 adds "≥1 enabled mode".
 
 **Reporter anonymity (spec 5.7).** A reported user must never learn who reported them through any endpoint, notification, or error message.

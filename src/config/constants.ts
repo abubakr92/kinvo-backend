@@ -28,3 +28,37 @@ export const CLIENT_HEADERS = {
   PLATFORM: 'x-platform',
   DEVICE_ID: 'x-device-id',
 } as const;
+
+/**
+ * Discovery and matching (spec §5.3, Batch 7).
+ *
+ * PROVISIONAL where marked. Open decision #6 (match expiry) is unanswered; the
+ * placeholder is recorded in DECISIONS.md §1.2e with the cost of changing it.
+ * Values that sell subscriptions are NOT here — daily swipe caps live in the
+ * entitlement matrix, because those must be changeable without a deploy.
+ */
+export const DISCOVERY = {
+  /** Cards persisted per user per mode per day. */
+  DECK_SIZE: 50,
+  /**
+   * Rows pulled from PostGIS before the relational filters run. Generous
+   * because mode, age, and visibility filtering happen after the radius search
+   * — too small a pool yields a short deck in a sparse area rather than an
+   * accurate one.
+   */
+  CANDIDATE_POOL: 500,
+  /** spec §5.3: verified users rank higher. A ranking input, not a hard filter. */
+  VERIFIED_SCORE_BONUS: 25,
+  /** An active boost outranks a verified badge but never bypasses a filter. */
+  BOOST_SCORE_BONUS: 40,
+  /** Recently active people are more likely to reply, so they surface first. */
+  RECENCY_SCORE_MAX: 20,
+  RECENCY_WINDOW_HOURS: 72,
+  /** Nearer is better, scaled across the user's own radius. */
+  PROXIMITY_SCORE_MAX: 15,
+  BOOST_DURATION_MINUTES: 30,
+  /** PROVISIONAL — open decision #6. */
+  MATCH_EXPIRY_DAYS: 14,
+  /** PROVISIONAL — open decision #6. Each extension adds this many days. */
+  MATCH_EXTENSION_DAYS: 7,
+} as const;

@@ -292,3 +292,41 @@ export async function countApprovedPhotos(userId: string): Promise<number> {
     },
   });
 }
+
+/**
+ * Primary photo URLs for many users at once.
+ *
+ * A deck of 20 cards calling {@link getPrimaryPhotoUrlFor} per card is 20 round
+ * trips and 20 presign operations — the N+1 that spec §4.7 exists to prevent.
+ * Every list endpoint that returns user_compact must use this.
+ *
+ * Users with no approved primary photo are absent from the map, and callers
+ * pass `?? null` so the key is still present in the response (spec §4.6).
+ */
+export async function getPrimaryPhotoUrlsFor(userIds: string[]): Promise<Map<string, string>> {
+  if (userIds.length === 0) {
+    return new Map();
+  }
+
+  const photos = await prisma.photo.findMany({
+    where: {
+      profile: { user_id: { in: userIds } },
+      deleted_at: null,
+      is_primary: true,
+      moderation_status: ModerationStatus.approved,
+    },
+    select: { s3_bucket: true, s3_key: true, profile: { select: { user_id: true } } },
+  });
+
+  const entries = await Promise.all(
+    photos.map(
+      async (photo) =>
+        [
+          photo.profile.user_id,
+          await presignDownload({ bucket: photo.s3_bucket as BucketName, key: photo.s3_key }),
+        ] as const,
+    ),
+  );
+
+  return new Map(entries);
+}

@@ -57,3 +57,30 @@ export function assertAdult(dateOfBirth: Date, field = 'date_of_birth'): void {
     });
   }
 }
+
+/**
+ * The date-of-birth window matching an inclusive age range.
+ *
+ * Filtering the deck by age has to become a date comparison, because the
+ * database stores a date of birth and computing an age per candidate row would
+ * make the GIST and B-tree indexes useless.
+ *
+ * Both bounds are inclusive of the age, which is why `gt` is strict on the
+ * older end: someone whose 40th birthday is today is 40, and must still appear
+ * for a maximum of 40. Using `gte` there would drop them on their birthday.
+ */
+export function dateOfBirthRangeForAges(
+  minAge: number,
+  maxAge: number,
+  now: Date = new Date(),
+): { gt: Date; lte: Date } {
+  const youngest = new Date(
+    Date.UTC(now.getUTCFullYear() - minAge, now.getUTCMonth(), now.getUTCDate()),
+  );
+
+  const oldest = new Date(
+    Date.UTC(now.getUTCFullYear() - maxAge - 1, now.getUTCMonth(), now.getUTCDate()),
+  );
+
+  return { gt: oldest, lte: youngest };
+}

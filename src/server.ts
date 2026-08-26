@@ -5,6 +5,7 @@ import { API_PREFIX } from '@config/constants';
 import { env } from '@config/env';
 import { connectDatabase, disconnectDatabase } from '@/db/prisma';
 import { connectRedis, disconnectRedis } from '@/db/redis';
+import { startJobs, stopJobs } from '@/jobs';
 import { logger } from '@utils/logger';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -20,6 +21,8 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 async function start(): Promise<Server> {
   await connectDatabase();
   await connectRedis();
+  // After Redis: BullMQ opens its own connections and needs one that works.
+  await startJobs();
 
   return app.listen(env.PORT, env.HOST, () => {
     logger.info(
@@ -61,6 +64,9 @@ function shutdown(signal: string): void {
   const closeConnections = async (): Promise<void> => {
     // Only after the HTTP server has stopped accepting and drained, or we would
     // sever queries belonging to requests still in flight.
+    // Workers stop first so a job in flight finishes against a live database
+    // rather than failing on a pool that closed underneath it.
+    await stopJobs();
     await Promise.allSettled([disconnectDatabase(), disconnectRedis()]);
   };
 

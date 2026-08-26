@@ -6,6 +6,7 @@ import { ERROR_CODES, ERROR_MESSAGES, ERROR_STATUS, type ErrorCode } from '@util
 import * as authSchema from '@modules/auth/auth.schema';
 import * as mediaSchema from '@modules/media/media.schema';
 import * as modesSchema from '@modules/modes/modes.schema';
+import { swipeBodySchema } from '@modules/discovery/discovery.schema';
 import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
@@ -452,6 +453,68 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.VALIDATION_FAILED, E.CONFLICT, E.NOT_FOUND, E.BAD_REQUEST],
   },
+  // --- discovery ----------------------------------------------------------
+  {
+    method: 'get',
+    path: '/discovery/{mode}/deck',
+    tag: 'Discovery',
+    summary: 'Today’s deck for one mode',
+    description:
+      'Cursor-paginated cards, precomputed once per user per mode per UTC day so the order is stable while scrolling. `distance_metres` is metres — format to miles on the client. Cards already swiped never reappear. Returns 400 if the mode is switched off or the account has no location.',
+    auth: true,
+    errors: [E.BAD_REQUEST, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/discovery/{mode}/swipe',
+    tag: 'Discovery',
+    summary: 'Pass, like, or super like',
+    description:
+      'The three actions are identical in every mode — only the label the app renders changes, and that comes from GET /config. Responds with `is_match` and the match when the target had already liked you IN THIS MODE. Likes and super likes spend daily quota; a pass is free. A second swipe on the same person in the same mode is 409.',
+    body: swipeBodySchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.NOT_FOUND, E.CONFLICT, E.QUOTA_EXCEEDED],
+  },
+  {
+    method: 'post',
+    path: '/discovery/{mode}/rewind',
+    tag: 'Discovery',
+    summary: 'Undo the last swipe in this mode',
+    description:
+      'Restores the profile to the deck and refunds the quota it spent. If that swipe had created a match, the match is removed too. Premium.',
+    auth: true,
+    errors: [E.PREMIUM_REQUIRED, E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/discovery/{mode}/likes-you',
+    tag: 'Discovery',
+    summary: 'Who liked you, in this mode',
+    description:
+      'The Requests tab: profiles, not messages. People you have already answered — matched or passed — are excluded. Premium.',
+    auth: true,
+    errors: [E.PREMIUM_REQUIRED, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/discovery/{mode}/boost',
+    tag: 'Discovery',
+    summary: 'Raise your ranking for a window',
+    description:
+      'Ranking only. A boost moves you up decks you already qualified for and can never place you into one a filter excluded you from. 409 while a boost is already running. Premium.',
+    auth: true,
+    errors: [E.PREMIUM_REQUIRED, E.CONFLICT, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/discovery/{mode}/stats',
+    tag: 'Discovery',
+    summary: 'Counters for the empty state',
+    description:
+      'Everything the end-of-deck screen needs in one call: swipe counts, active matches, how many people are waiting in likes-you, cards left today, any running boost, and what is left of the daily allowance. `likes_received` is a count only — the profiles stay behind the paywall.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
   // --- entitlements -------------------------------------------------------
   {
     method: 'get',
@@ -800,6 +863,7 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       { name: 'Profile', description: 'Profile content and public views' },
       { name: 'Media', description: 'Uploads, photos' },
       { name: 'Verification', description: 'Identity verification' },
+      { name: 'Discovery', description: 'Decks, swipes, matches forming, boosts' },
       {
         name: 'Entitlements',
         description: 'Plan features and daily quotas',

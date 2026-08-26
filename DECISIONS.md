@@ -90,6 +90,17 @@ listed with what it costs to change later.
 | — | Block visibility | **Conversation frozen and visible; 404 on every other path** | **Code.** Affects the shared exclusion clause and the chat module. |
 | 8 | Moderation provider | **Rules-based v1, behind a provider interface** | Provider swap. Cheap by design. |
 
+### 1.2f Resolved during Batch 7 (discovery and matching)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **A pass costs no quota; only likes and super likes do.** | 2026-08-26 | Eng | The spec says "daily swipe cap" and the flag is `daily_swipe_limit`. Read literally that would cap passes too, which strands a free user on a profile they do not want and extracts no value — nobody has ever paid to skip someone faster. Read as a cap on the actions that can lead to a match, it does the job it exists for. **This is an interpretation, not a PO decision** — one constant in `swipe.service.ts` reverses it. |
+| **Rewind deletes the match its swipe created.** | 2026-08-26 | Eng | Keeping it leaves a conversation neither person can trace, and the unique index on `(user_a, user_b, mode)` would stop the pair ever matching again in that mode. Rewind means restoring the pre-swipe state or it means nothing. |
+| **Decks are generated lazily on read; BullMQ precompute is an optimisation.** | 2026-08-26 | Eng | Built the other way round, a worker that is down, behind, or not yet deployed shows users an empty product. This way a queue outage costs latency on first open and nothing else. |
+| **Boost and verification are RANKING inputs only.** | 2026-08-26 | Eng | Neither can place someone into a deck a filter excluded them from. Conflating ranking with filtering is precisely how a paid boost would start beating a block. A test asserts a boosted, blocked user still does not appear. |
+| **The deck pre-excludes cheaply, then applies the shared clause in Prisma.** | 2026-08-26 | Eng | PostGIS cannot compose `visibleUserFilter`, so the radius query takes an exclusion array (self, blocks, already-swiped) and the real clause runs on the result. `CANDIDATE_POOL` is 500 against a deck of 50, so the two-phase split cannot truncate a correct answer. |
+| **Cursors are opaque base64, never parsed outside `@utils/cursor`.** | 2026-08-26 | Eng | The moment anything reads a cursor payload it becomes an API surface, and the ordering key can never change again without a client release. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -316,6 +327,15 @@ AWS access was delayed, so S3 runs locally as **MinIO** in docker-compose. This 
 - Avoided a second trap: `jest.useFakeTimers()` around a live Redis call deadlocks, because ioredis drives its command queue on real timers. The UTC-day test writes yesterday’s key directly instead.
 - Batch 5’s duplicate matrix read in `modes.service` deleted.
 
+### 2026-08-26 — Batch 7: Discovery and matching
+
+- 6 endpoints: deck, swipe, rewind, likes-you, boost, stats — all mode-scoped through a path parameter, so no request can reach a service without a mode.
+- The deck builder applies six rules at once: the shared block clause, radius, age window, mode-enabled, already-swiped-in-this-mode, and account state. Each has its own test rather than one composite assertion.
+- BullMQ added: queue, worker, and a UTC-midnight scheduler. Jobs never start under test.
+- **Bug found by its own test: the likes-you filter was inverted.** It excluded actors whose `swipes_made` included a swipe at the viewer — which is the very like being listed, so every admirer silently excluded themselves and the premium inbox was always empty. The correct question is whether the actor RECEIVED a swipe from the viewer. Five tests caught it.
+- **Bug found while writing the worker:** the scheduler fans out on the queue it feeds, so the repeatable job arrived with empty data and the worker tried to build a deck for an undefined user. The worker now branches on job name.
+- Cursor pagination added (`@utils/cursor`), first used here and reused by matches, messages, and notifications from Batch 8.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -330,8 +350,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 4     | Media and verification      | ✅     | **AWS S3 buckets (real)**                                    | Photo URL strategy; R2 vs S3   |
 | 5     | Modes and settings          | ✅     | Docker                                                       | **#9** answered                |
 | 6     | Entitlements (stub)         | ✅     | Redis                                                        | —                              |
-| 7     | Discovery and matching      | ▶      | Redis + BullMQ                                               | #6, #7, #10 — see **1.2e**     |
-| 8     | Matches and chat REST       | ⬜     | Docker                                                       | #7; block visibility           |
+| 7     | Discovery and matching      | ✅     | Redis + BullMQ                                               | #6, #7, #10 — see **1.2e**     |
+| 8     | Matches and chat REST       | ▶      | Docker                                                       | #7; block visibility           |
 | 9     | Realtime                    | ⬜     | Redis. **Host must support WebSockets**                      | —                              |
 | 10    | Moderation                  | ⬜     | Moderation provider account                                  | **#8**                         |
 | 11    | Notifications               | ⬜     | **Firebase project + service account, SMTP credentials**     | —                              |
