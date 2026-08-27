@@ -11,6 +11,7 @@ import { USER_COMPACT_SELECT, type UserCompact, toUserCompact } from '@utils/com
 import { decodeCursor, paginate } from '@utils/cursor';
 import { logger } from '@utils/logger';
 import { emitMatch } from '@/realtime/emit';
+import { notify } from '@modules/notifications/notifications.service';
 import { consumeDeckEntry, requireEnabledMode, restoreDeckEntry } from './deck.service';
 
 /**
@@ -128,6 +129,10 @@ export async function swipe(
   // cannot leave both people notified of a match that does not exist.
   if (match) {
     await announceMatch(match, actorId, targetId);
+  } else if (costsQuota) {
+    // A like that did not complete a match. Only the target hears about it, and
+    // only that it happened.
+    await announceLike(targetId, mode, action === SwipeAction.super_like);
   }
 
   return {
@@ -330,5 +335,33 @@ async function announceMatch(match: MatchModel, actorId: string, targetId: strin
       expires_at: match.expires_at.toISOString(),
       user: toUserCompact(otherUser, photoUrls.get(other) ?? null),
     });
+
+    // Persisted to the feed as well as pushed. A socket event reaches only a
+    // connected client, and a push banner is gone once dismissed — the feed is
+    // the only place a match notification can still be found tomorrow.
+    await notify({
+      userId: recipient,
+      category: 'new_match',
+      title: 'It is a match!',
+      body: `You and ${otherUser.display_name} liked each other.`,
+      data: { match_id: match.id, mode: match.mode, user_id: other },
+    });
   }
+}
+
+/**
+ * Tells someone they were liked, WITHOUT saying by whom.
+ *
+ * Who liked you is behind a paywall (see `likesYou`). Naming them here would
+ * give the feature away in a push banner, so the notification carries a count
+ * and a deep link to the paywalled screen.
+ */
+async function announceLike(targetId: string, mode: Mode, isSuperLike: boolean): Promise<void> {
+  await notify({
+    userId: targetId,
+    category: 'new_like',
+    title: isSuperLike ? 'Someone super liked you' : 'Someone liked you',
+    body: 'Open Kinvo to see who it is.',
+    data: { mode, is_super_like: isSuperLike },
+  });
 }

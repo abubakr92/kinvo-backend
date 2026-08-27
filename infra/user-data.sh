@@ -93,6 +93,20 @@ REQUIRE_THIRD_PARTY_INTEGRATIONS=false
 # secret on the box at all.
 ENVFILE
 
+# Firebase service account, appended separately.
+#
+# It is a JSON document containing a PEM private key, so it cannot go in the
+# heredoc above without the shell mangling it. Written with printf %s so the
+# value lands verbatim, and never written to its own file on disk -- a key file
+# on a box is a key file that ends up in an image, a backup, or a support
+# ticket.
+FIREBASE_JSON=$(get_secret firebase_service_account 2>/dev/null || true)
+
+if [ -n "$FIREBASE_JSON" ]; then
+  printf 'FIREBASE_SERVICE_ACCOUNT_JSON=%s
+' "$FIREBASE_JSON" >> "$APP_DIR/.env"
+fi
+
 chmod 600 "$APP_DIR/.env"
 
 cat > "$APP_DIR/db.env" <<DBENV

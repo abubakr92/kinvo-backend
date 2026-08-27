@@ -9,6 +9,10 @@ import * as modesSchema from '@modules/modes/modes.schema';
 import { swipeBodySchema } from '@modules/discovery/discovery.schema';
 import { sendMessageSchema, updateConversationSchema } from '@modules/chat/chat.schema';
 import { checkContentSchema, resolveFlagSchema } from '@modules/moderation/moderation.schema';
+import {
+  registerPushTokenSchema,
+  updatePreferenceSchema,
+} from '@modules/notifications/notifications.schema';
 import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
@@ -662,6 +666,93 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.FORBIDDEN, E.NOT_FOUND, E.VALIDATION_FAILED],
   },
+  // --- notifications ------------------------------------------------------
+  {
+    method: 'get',
+    path: '/notifications',
+    tag: 'Notifications',
+    summary: 'The notification feed',
+    description:
+      'Every notification is persisted here AND pushed — never pushed alone. A push banner is gone once dismissed, so this feed is the only place a notification can still be found afterwards. Cursor-paginated, newest first. `?unread_only=true` filters.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/notifications/unread-count',
+    tag: 'Notifications',
+    summary: 'Unread notification count',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'get',
+    path: '/notifications/badges',
+    tag: 'Notifications',
+    summary: 'Badge counts for all five tabs',
+    description:
+      'Discover, Requests, Matches, Plans, Notifications, plus a total. Poll this on app resume rather than calling five endpoints. `total` deliberately EXCLUDES `discover` — cards waiting is not something the user is behind on, and counting it would make the app badge permanently non-zero.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'post',
+    path: '/notifications/read-all',
+    tag: 'Notifications',
+    summary: 'Mark everything read',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'post',
+    path: '/notifications/{id}/read',
+    tag: 'Notifications',
+    summary: 'Mark one read',
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'get',
+    path: '/notifications/preferences',
+    tag: 'Notifications',
+    summary: 'Per-category delivery preferences',
+    description:
+      'All eight categories, with defaults filled in for any the user has never changed — so the settings screen renders from one call and never has to know what the defaults are.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'patch',
+    path: '/notifications/preferences/{category}',
+    tag: 'Notifications',
+    summary: 'Change a category',
+    description:
+      '**Safety notifications cannot be muted** for push or in-app: they carry emergency and moderation outcomes, and someone missing the result of a report they filed is the failure this product cannot have. Their email channel can still be switched off.',
+    body: updatePreferenceSchema,
+    auth: true,
+    errors: [E.BAD_REQUEST, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/notifications/tokens',
+    tag: 'Notifications',
+    summary: 'Register an FCM token',
+    description:
+      'The token belongs to a DEVICE, not a user — one person may have several, each with its own token. The device must already be signed in. Re-registering a token that was on another device moves it, because FCM issues one token per install.',
+    body: registerPushTokenSchema,
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'delete',
+    path: '/notifications/tokens/{device_id}',
+    tag: 'Notifications',
+    summary: 'Stop pushing to a device',
+    description:
+      'Clears the token WITHOUT ending the session. Revoking a device is the security action and lives at DELETE /devices/{id}.',
+    auth: true,
+    errors: [E.VALIDATION_FAILED],
+  },
   // --- entitlements -------------------------------------------------------
   {
     method: 'get',
@@ -1016,6 +1107,10 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       {
         name: 'Moderation',
         description: 'Pre-send checks and the moderation queue',
+      },
+      {
+        name: 'Notifications',
+        description: 'Feed, push tokens, preferences, badge counts',
       },
       {
         name: 'Entitlements',

@@ -3,6 +3,7 @@ import { Queue } from 'bullmq';
 import { logger } from '@utils/logger';
 import { QUEUE_NAMES, closeQueues, jobConnection, jobsEnabled } from './queues';
 import {
+  REMINDER_JOB_NAME,
   SCHEDULER_JOB_NAME,
   enqueueDailyDecks,
   startDeckWorker,
@@ -25,6 +26,15 @@ let scheduler: Queue | null = null;
  */
 const DAILY_DECK_CRON = '10 0 * * *';
 
+/**
+ * Plan reminders run every half hour, not daily.
+ *
+ * The reminder goes out two hours before a plan starts, so a daily sweep would
+ * miss anything booked in the morning for that evening — which is most plans.
+ * The sweep window is wider than this interval, so a skipped run leaves no gap.
+ */
+const PLAN_REMINDER_CRON = '*/30 * * * *';
+
 export async function startJobs(): Promise<void> {
   if (!jobsEnabled()) {
     return;
@@ -40,7 +50,13 @@ export async function startJobs(): Promise<void> {
     { name: SCHEDULER_JOB_NAME, data: {} },
   );
 
-  logger.info({ cron: DAILY_DECK_CRON }, 'jobs started');
+  await scheduler.upsertJobScheduler(
+    'plan-reminders',
+    { pattern: PLAN_REMINDER_CRON, tz: 'UTC' },
+    { name: REMINDER_JOB_NAME, data: {} },
+  );
+
+  logger.info({ decks: DAILY_DECK_CRON, reminders: PLAN_REMINDER_CRON }, 'jobs started');
 }
 
 export async function stopJobs(): Promise<void> {

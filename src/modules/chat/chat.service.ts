@@ -13,6 +13,7 @@ import { getPrimaryPhotoUrlsFor } from '@modules/media/photos.service';
 import { getBlockedUserIds, isBlockedBetween } from '@modules/safety/block.service';
 import { isExpired, otherUserId } from '@modules/matches/matches.service';
 import { scanSubject } from '@modules/moderation/moderation.service';
+import { notify } from '@modules/notifications/notifications.service';
 import { otherParticipantId } from '@/realtime/participants';
 import { onlineStatusFor } from '@/realtime/presence';
 import { ApiError } from '@utils/api-error';
@@ -505,6 +506,18 @@ export async function sendMessage(
       unread_count: recipientState?.unread_count ?? 0,
       last_message_at: view.created_at,
       last_message_preview: previewFor(input.type, input.body ?? null),
+    });
+
+    const sender = participantFor(conversation, recipientId);
+
+    await notify({
+      userId: recipientId,
+      category: 'new_message',
+      title: sender.display_name,
+      // The preview, not the body: a media message has no text, and a very long
+      // message should not arrive as a wall of text in a banner.
+      body: previewFor(input.type, input.body ?? null),
+      data: { conversation_id: conversationId, match_id: conversation.match_id },
     });
 
     return view;

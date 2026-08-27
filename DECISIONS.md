@@ -150,6 +150,19 @@ listed with what it costs to change later.
 | **Firebase is set up live, together.** | PO | Eng stops before Batch 11 and the PO runs the Firebase CLI so the project is configured for real rather than mocked. |
 | **Apple/Play accounts are NOT a blocker for building Batch 13.** | Eng (correction) | Eng had earlier advised starting Apple enrolment urgently. That was wrong: JWS verification uses Apple's public root certificates, and the interface, webhook handlers, lifecycle, and idempotency all build and test without an account. Accounts are needed for sandbox end-to-end verification, which is normal and comes later — and are typically handed to the backend team rather than created by it. |
 
+### 1.2k Resolved during Batch 11 (notifications)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Every notification is persisted to the feed AND pushed. Never pushed alone.** | 2026-08-27 | Eng | Spec §7 states it and the whole module is shaped by it. A push banner is gone the moment it is dismissed, and the Notifications screen reads the feed — so push-only means someone who swiped away a "new match" banner has no route back to it. Persisting first is also what makes push, email, and socket delivery all best-effort. |
+| **A missing preference row means the DEFAULT, not "off".** | 2026-08-27 | Eng | Users who never opened notification settings have no rows. Treating absent as off would have silently disabled notifications for every existing account the day this shipped. |
+| **Safety notifications cannot be muted** (push or in-app). | 2026-08-27 | Eng | Spec §5.7: they carry emergency and moderation outcomes. Someone who muted "safety" a month ago and misses the result of a report they filed is the failure this product cannot have. Their email channel can still be turned off, because that is not the alert. |
+| **The "someone liked you" notification never names who.** | 2026-08-27 | Eng | Who liked you is behind a paywall (`see_who_liked_you`). Naming them in a push banner gives the paid feature away. The notification carries a deep link to the paywalled screen instead. A test asserts neither the name nor the id appears in the payload. |
+| **`total` in badge counts excludes `discover`.** | 2026-08-27 | Eng | Cards waiting in a deck is not something the user is behind on. Counting it would make the app badge permanently non-zero, which trains people to ignore it. |
+| **FCM tokens belong to a device, not a user.** | 2026-08-27 | Eng | One person may have a phone and a tablet, each with its own token. Registering a token that was previously on another device MOVES it, because FCM issues one token per install and leaving it on both fans one push out to a device that no longer exists. |
+| **Plan reminders are a half-hourly sweep, not a timer per plan.** | 2026-08-27 | Eng | A timer would have to survive restarts, redeploys, and every edit to the plan time. A sweep asking "what starts soon and has not been reminded?" survives all three, and the feed itself is the idempotency key — no extra column. |
+| **A dead push token is cleared on the provider's say-so, transient failures are not.** | 2026-08-27 | Eng | Only FCM's permanent-failure codes clear a token. Treating a network blip as a dead token would unsubscribe a working device. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -436,6 +449,15 @@ Four gaps closed before starting Batch 11. All $0.
 
 **Still open on AWS:** the CloudFront→origin hop is still HTTP. A public certificate authority will not issue for a bare IP, so real TLS there waits on a domain. Until then the hop is inside AWS's network and reachable from nowhere else, which is a mitigation rather than a fix. Postgres should move to RDS before production.
 
+### 2026-08-27 — Batch 11: Notifications
+
+- 9 endpoints: feed, unread count, badges, mark read, mark all read, preferences (list + update), push token register/unregister.
+- **Firebase configured live with the PO.** Project `kinvo-staging-48a73c26` created via the Firebase CLI; the Admin SDK service account is held in SSM Parameter Store as a SecureString and injected as one environment variable. It is never written to disk on the instance — a key file on a box ends up in an image, a backup, or a support ticket.
+- Push and email both sit behind provider interfaces that fall back to a no-op when credentials are absent. That is only safe because the feed is written first, which is the same reasoning as the socket layer.
+- Notifications wired into real events: new match (both sides), new message (recipient only, titled with the sender), new like (target only, without naming who).
+- Plan reminders join the BullMQ scheduler on a half-hourly cadence, separate from the daily deck job — a daily sweep would miss anything booked in the morning for that evening, which is most plans.
+- SMTP is built and unwired: `SMTP_*` variables are read, and email falls back to a no-op until the PO supplies credentials.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -454,8 +476,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 8     | Matches and chat REST       | ✅     | Docker                                                       | #7; block visibility           |
 | 9     | Realtime                    | ✅     | Redis. **Host must support WebSockets**                      | —                              |
 | 10    | Moderation                  | ✅     | Moderation provider account                                  | **#8**                         |
-| 11    | Notifications               | ▶      | **Firebase project + service account, SMTP credentials**     | —                              |
-| 12    | Safety, plans, venues       | ⬜     | S3 (report evidence)                                         | Block visibility               |
+| 11    | Notifications               | ✅     | **Firebase project + service account, SMTP credentials**     | —                              |
+| 12a   | Safety                      | ▶      | S3 (report evidence)                                         | Block visibility               |
 | 13    | Subscriptions               | ⬜     | **Apple Developer + App Store Connect, Google Play Console** | **#2, #3, #14**, RevenueCat    |
 | 14    | Video calling               | ⬜     | **Twilio Video credentials**                                 | —                              |
 | 15    | Admin, docs, hardening      | ⬜     | —                                                            | **#12**                        |

@@ -131,6 +131,30 @@ export const envSchema = z.object({
   S3_VERIFICATION_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
 
   /**
+   * Firebase service-account JSON, as one string (spec §3, Batch 11).
+   *
+   * Held in SSM Parameter Store and injected as an environment variable rather
+   * than written to disk on the instance — a key file on a box is a key file
+   * that gets copied into a backup, an image, or a support ticket.
+   *
+   * Absent, push falls back to a no-op. That is safe only because every
+   * notification is persisted to the feed first, so the user still sees it in
+   * the app; they simply get no banner.
+   */
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+
+  /**
+   * SMTP. All four must be present together or email falls back to a no-op —
+   * a half-configured transport fails at send time, which is the worst place
+   * to discover it.
+   */
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+
+  /**
    * Whether Twilio, Google, and Apple credentials must be present in production.
    *
    * Defaults true, and must stay true anywhere real users sign in: without it,

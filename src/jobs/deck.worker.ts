@@ -3,6 +3,7 @@ import { Worker } from 'bullmq';
 import { ALL_MODES } from '@modules/modes/modes.service';
 import { generateDeck, usersNeedingDecks } from '@modules/discovery/deck.service';
 import { sweepExpiredMatches } from '@modules/matches/matches.service';
+import { sendPlanReminders } from '@modules/notifications/reminders.service';
 import { logger } from '@utils/logger';
 import { QUEUE_NAMES, type DeckGenerationJob, getDeckQueue, jobConnection } from './queues';
 
@@ -19,6 +20,9 @@ import { QUEUE_NAMES, type DeckGenerationJob, getDeckQueue, jobConnection } from
 /** The repeatable job that fans out into one job per user per mode. */
 export const SCHEDULER_JOB_NAME = 'enqueue-daily-decks';
 
+/** The half-hourly plan-reminder sweep. */
+export const REMINDER_JOB_NAME = 'send-plan-reminders';
+
 let worker: Worker<DeckGenerationJob> | null = null;
 
 export function startDeckWorker(): Worker<DeckGenerationJob> {
@@ -33,6 +37,10 @@ export function startDeckWorker(): Worker<DeckGenerationJob> {
       // what separates "enqueue everyone" from "build one deck". Without this
       // branch the repeatable job arrives with empty data and the worker tries
       // to build a deck for an undefined user.
+      if (job.name === REMINDER_JOB_NAME) {
+        return { reminded: await sendPlanReminders() };
+      }
+
       if (job.name === SCHEDULER_JOB_NAME) {
         // Bookkeeping only: `isExpired` already treats a lapsed match as
         // expired at read time, so this job being late or never running

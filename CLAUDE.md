@@ -217,6 +217,16 @@ Also:
 
 **Reporter anonymity (spec 5.7).** A reported user must never learn who reported them through any endpoint, notification, or error message.
 
+**Notifications (spec §7).** **Every notification is persisted to the feed AND pushed — never pushed alone.** The Notifications screen reads the feed, so a push-only notification vanishes when the banner is dismissed. Persisting first is what makes push, email, and socket delivery all best-effort.
+
+- A **missing preference row means the default**, not "off". Absent-as-off would silently disable notifications for every existing account.
+- **Safety notifications cannot be muted** for push or in-app (§5.7). Email can be.
+- The "someone liked you" notification **never names who** — that is behind a paywall, and a banner would give it away.
+- `total` in badge counts **excludes `discover`**: cards waiting is not a thing the user is behind on, and a permanently non-zero badge trains people to ignore it.
+- FCM tokens belong to a **device**, not a user. Re-registering a token moves it off its previous device, because FCM issues one per install.
+- Clear a token only on FCM's **permanent-failure** codes. A network blip is not a dead device.
+- Scheduled work is a **sweep**, not a timer per row — sweeps survive restarts and edits, and the feed doubles as the idempotency key.
+
 **Logging.** Pino only — `no-console` is an ESLint error. No PII in logs; redaction lives in `src/utils/logger.ts`. Log `req.path`, never `req.originalUrl`.
 
 **Database.** Import the client from `@/db/prisma` — never from `src/generated/prisma`, which is Prisma 7's git-ignored output directory. Prisma 7 connects through `@prisma/adapter-pg`, not a URL on the client.
