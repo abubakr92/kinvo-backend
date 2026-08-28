@@ -1,5 +1,6 @@
 import { UserStatus, prisma } from '@/db/prisma';
 import { revokeAllTokensForUser } from '@modules/auth/token.service';
+import { erasePersonalData } from '@modules/safety/erasure.service';
 import { ApiError } from '@utils/api-error';
 import { logger } from '@utils/logger';
 
@@ -19,12 +20,11 @@ export interface DeleteAccountResult {
  * `@modules/safety/block.service` filters `deleted_at: null`, so the account
  * disappears from every read path immediately.
  *
- * Personal data is NOT scrubbed here. Reports, moderation history, and evidence
- * retention all reference this user, and deciding what must survive an erasure
- * request is a safety question that Batch 12 answers with the rest of the
- * safety module. Until then the row is retained in full — deliberately, and
- * recorded in DECISIONS.md, because retaining data you have promised to erase
- * is a compliance problem rather than an oversight to discover later.
+ * Personal data IS scrubbed, by `erasePersonalData` in the safety module.
+ * Identifying fields are destroyed; reports, moderation records, and payment
+ * history survive pointing at a row that no longer says who it was. Otherwise
+ * deleting your account would be the way to erase your own misconduct record.
+ * See erasure.service.ts for what is kept and why.
  *
  * Idempotent: deleting twice returns the original timestamp rather than
  * erroring, so a retried request on a flaky connection is not a failure.
@@ -57,6 +57,12 @@ export async function deleteAccount(userId: string): Promise<DeleteAccountResult
 
   // Sessions die with the account; a live access token must not outlive it.
   await revokeAllTokensForUser(userId);
+
+  // Scrubbed after the soft delete, not inside it: the account must disappear
+  // from every read path the instant the status changes, and erasure touches
+  // enough tables that holding that transaction open would be the slowest write
+  // in the system.
+  await erasePersonalData(userId);
 
   logger.info({ user_id: userId }, 'account deleted');
 

@@ -49,6 +49,14 @@ module.exports = {
   clearMocks: true,
   restoreMocks: true,
   // Integration tests truncate and re-seed against a real Postgres.
-  testTimeout: 30000,
+  //
+  // Sixty seconds is far more than any test needs and is deliberately a
+  // CEILING rather than a delay: nothing waits for it. It was raised from 30s
+  // after `beforeEach(resetDatabase)` — a single TRUNCATE ... CASCADE — began
+  // exceeding the hook timeout on a host whose process spawning had slowed
+  // sharply. Those failures said nothing about the code: the same suite passed
+  // in isolation moments later. A timeout that fails on machine speed rather
+  // than behaviour teaches the team to re-run rather than to read.
+  testTimeout: 60000,
   verbose: false,
 };

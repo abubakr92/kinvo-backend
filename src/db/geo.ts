@@ -209,3 +209,100 @@ export async function findVenuesWithinRadius(
     LIMIT ${limit}
   `;
 }
+
+// ---------------------------------------------------------------------------
+// Live location (spec §5.7, Batch 12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Records a position on an active sharing session.
+ *
+ * spec §5.7 calls live location high-risk data and asks for no historical trail
+ * beyond the immediate safety need. The retention rule is enforced by
+ * `pruneExpiredLiveLocations` below, not by the client choosing to stop sending.
+ */
+export async function recordLocationPing(
+  sessionId: string,
+  coordinates: Coordinates,
+  accuracyMetres?: number,
+): Promise<void> {
+  assertValidCoordinates(coordinates);
+
+  await prisma.$executeRaw`
+    INSERT INTO live_location_pings (id, session_id, location, accuracy_metres, recorded_at)
+    VALUES (
+      gen_random_uuid(),
+      ${sessionId}::uuid,
+      ${point(coordinates)},
+      ${accuracyMetres ?? null}::int,
+      NOW()
+    )
+  `;
+}
+
+export interface LocationPing {
+  latitude: number;
+  longitude: number;
+  accuracy_metres: number | null;
+  recorded_at: Date;
+}
+
+/** The most recent positions on a session, newest first. */
+export async function readLocationPings(sessionId: string, limit = 50): Promise<LocationPing[]> {
+  return prisma.$queryRaw<LocationPing[]>`
+    SELECT ST_Y(location::geometry) AS latitude,
+           ST_X(location::geometry) AS longitude,
+           accuracy_metres,
+           recorded_at
+    FROM live_location_pings
+    WHERE session_id = ${sessionId}::uuid
+      AND location IS NOT NULL
+    ORDER BY recorded_at DESC
+    LIMIT ${limit}
+  `;
+}
+
+/**
+ * Deletes the position trail of sessions that have ended or lapsed.
+ *
+ * The session row survives — it is the audit record that sharing happened, and
+ * a safety investigation needs to know that. The POSITIONS do not: spec §5.7
+ * says retain no historical trail beyond the immediate need, and a stored
+ * movement history is the single most damaging thing this database could leak.
+ */
+export async function pruneExpiredLiveLocations(now: Date = new Date()): Promise<number> {
+  const result = await prisma.$executeRaw`
+    DELETE FROM live_location_pings
+    WHERE session_id IN (
+      SELECT id FROM live_location_sessions
+      WHERE ended_at IS NOT NULL OR expires_at <= ${now}
+    )
+  `;
+
+  return result;
+}
+
+/** Emergency events carry a position so responders know where to look. */
+export async function setEmergencyLocation(
+  eventId: string,
+  coordinates: Coordinates,
+): Promise<void> {
+  assertValidCoordinates(coordinates);
+
+  await prisma.$executeRaw`
+    UPDATE emergency_events
+    SET location = ${point(coordinates)}
+    WHERE id = ${eventId}::uuid
+  `;
+}
+
+export async function getEmergencyLocation(eventId: string): Promise<Coordinates | null> {
+  const rows = await prisma.$queryRaw<{ longitude: number; latitude: number }[]>`
+    SELECT ST_X(location::geometry) AS longitude,
+           ST_Y(location::geometry) AS latitude
+    FROM emergency_events
+    WHERE id = ${eventId}::uuid AND location IS NOT NULL
+  `;
+
+  return rows[0] ?? null;
+}

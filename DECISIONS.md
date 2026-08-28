@@ -163,6 +163,28 @@ listed with what it costs to change later.
 | **Plan reminders are a half-hourly sweep, not a timer per plan.** | 2026-08-27 | Eng | A timer would have to survive restarts, redeploys, and every edit to the plan time. A sweep asking "what starts soon and has not been reminded?" survives all three, and the feed itself is the idempotency key — no extra column. |
 | **A dead push token is cleared on the provider's say-so, transient failures are not.** | 2026-08-27 | Eng | Only FCM's permanent-failure codes clear a token. Treating a network blip as a dead token would unsubscribe a working device. |
 
+### 1.2l Scope and correction — 2026-08-28
+
+| Decision | By | Detail |
+| --- | --- | --- |
+| **Google Play billing is out, as Apple already was.** | PO | Both stores belong to the mobile team. Batch 13 is now the provider-agnostic subscription core plus **Stripe only** — no StoreKit, no Play Billing, no store webhooks. The `PaymentProvider` interface stays, so a store implementation can be added later without touching the lifecycle. This removes the batch's largest risk entirely. |
+| **A domain is a LAUNCH requirement, not a development one.** | Eng (correction) | Eng had listed the domain as blocking three items. It is not. CloudFront already terminates TLS for clients; the origin hop is unreachable from anywhere but CloudFront; and SES sandbox delivering only to verified addresses is exactly the right shape for development. Spam filtering does not matter when nobody real is receiving. What the domain actually gates — DKIM/SPF alignment, SES production access, branded URLs, origin TLS — all belong to launch. Raising it as urgent created pressure that was not real. |
+
+### 1.2m Resolved during Batch 12 (safety, plans, venues)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Erasure destroys identity and KEEPS safety records.** | 2026-08-28 | Eng | Closes the GDPR debt from §1.2c. Two obligations pull opposite ways: erasure says a deleted user's data must go, safety says a report about them must survive — otherwise deleting your account becomes the way to erase your own misconduct record. Identifying fields are destroyed; reports, moderation history, and payment records survive pointing at a row that no longer says who it was. |
+| **Identifiers are replaced with a random token, not a hash.** | 2026-08-28 | Eng | A hash of an email address is still an email address to anyone holding a list to check against. That is precisely how "anonymised" datasets are de-anonymised. |
+| **Stopping live-location sharing DESTROYS the trail.** | 2026-08-28 | Eng | Spec §5.7: retain no historical trail beyond the immediate need. The session row survives as the record that sharing happened — a safety investigation needs that — but the positions do not. A stored movement history is the single most damaging thing this database could leak. |
+| **Trusted contacts get no endpoint returning coordinates.** | 2026-08-28 | Eng | They have no account here, so there is nothing to authenticate them with, and a shareable link to someone's live position is exactly the artefact §5.7 warns about. They are told sharing STARTED and can contact the person directly. |
+| **A ping on an expired session is refused, never extends it.** | 2026-08-28 | Eng | The TTL is the user's consent boundary. A client that keeps sending must not be able to push it outward. |
+| **A plan DRAFT is invisible to the other participant.** | 2026-08-28 | PO-confirmed | Spec §5.8. Someone sketching an idea they might not send must not have it appear on the other person's screen — that is the entire difference between a draft and a message. No notification either. |
+| **Only the non-proposer may respond to a plan.** | 2026-08-28 | Eng | Otherwise someone could accept their own proposal and produce a confirmed meeting the other person never agreed to. |
+| **Only a CONFIRMED plan can be shared with trusted contacts.** | 2026-08-28 | Eng | Telling someone's family about a plan that was never accepted is noise, and it leaks the other person's availability before they agreed to anything. |
+| **Blocking unmatches; unblocking does NOT restore the match.** | 2026-08-28 | PO-confirmed | A block alone leaves the match visible and frozen, which is right for a lapsed match and wrong for one deliberately cut. Unblocking means "I am willing to see this person again", not "undo everything" — and the pair can simply match again. |
+| **Venue suggestions centre on the CALLER's location, not a midpoint.** | 2026-08-28 | PO-confirmed | A midpoint sounds fairer but requires reading the other person's coordinates to compute, and exposing where someone lives — even indirectly, through which venues appear — is not worth the convenience. |
+
 ### 1.3 Still open — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
@@ -458,6 +480,17 @@ Four gaps closed before starting Batch 11. All $0.
 - Plan reminders join the BullMQ scheduler on a half-hourly cadence, separate from the daily deck job — a daily sweep would miss anything booked in the morning for that evening, which is most plans.
 - SMTP is built and unwired: `SMTP_*` variables are read, and email falls back to a no-op until the PO supplies credentials.
 
+### 2026-08-28 — Batch 12: Safety, plans, venues
+
+- 33 endpoints across three parts: safety (18), plans (8), venues (6), plus the erasure path. 113 endpoints total.
+- **The GDPR debt from Batch 3 is closed.** Account deletion scrubs identity while keeping safety and payment records. Both halves are tested — what is destroyed AND what survives.
+- Live location is treated as the highest-risk data in the product: explicit start only, a hard TTL that cannot be extended by a client, and destruction of the position trail the moment sharing stops.
+- Reporter anonymity has its own test block. The moderation queue is the only path that returns a reporter identity, and it is behind a role gate.
+- The block rule is tested across decks, profiles, matches, chat, and plans in one case, as spec §7 asks.
+- Location and plan sweeps joined the existing half-hourly scheduler rather than adding another cadence.
+
+**Test-infrastructure note.** Two social-auth tests failed on `beforeEach(resetDatabase)` exceeding the 30-second hook timeout — a single TRUNCATE. They passed in isolation immediately afterwards, and the full run took 47 minutes against roughly 14 earlier in the project. The cause is host degradation (see §1.2n), not the code. The jest timeout was raised to 60s as a ceiling, not a delay.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -477,8 +510,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 9     | Realtime                    | ✅     | Redis. **Host must support WebSockets**                      | —                              |
 | 10    | Moderation                  | ✅     | Moderation provider account                                  | **#8**                         |
 | 11    | Notifications               | ✅     | **Firebase project + service account, SMTP credentials**     | —                              |
-| 12a   | Safety                      | ▶      | S3 (report evidence)                                         | Block visibility               |
-| 13    | Subscriptions               | ⬜     | **Apple Developer + App Store Connect, Google Play Console** | **#2, #3, #14**, RevenueCat    |
+| 12    | Safety, plans, venues       | ✅     | S3 (report evidence)                                         | Block visibility               |
+| 13    | Subscriptions (Stripe only) | ▶      | Stripe account                                               | **#2, #3**                     |
 | 14    | Video calling               | ⬜     | **Twilio Video credentials**                                 | —                              |
 | 15    | Admin, docs, hardening      | ⬜     | —                                                            | **#12**                        |
 

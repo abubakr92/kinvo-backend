@@ -4,6 +4,8 @@ import { ALL_MODES } from '@modules/modes/modes.service';
 import { generateDeck, usersNeedingDecks } from '@modules/discovery/deck.service';
 import { sweepExpiredMatches } from '@modules/matches/matches.service';
 import { sendPlanReminders } from '@modules/notifications/reminders.service';
+import { sweepLiveLocations } from '@modules/safety/location.service';
+import { sweepCompletedPlans } from '@modules/plans/plans.service';
 import { logger } from '@utils/logger';
 import { QUEUE_NAMES, type DeckGenerationJob, getDeckQueue, jobConnection } from './queues';
 
@@ -38,7 +40,16 @@ export function startDeckWorker(): Worker<DeckGenerationJob> {
       // branch the repeatable job arrives with empty data and the worker tries
       // to build a deck for an undefined user.
       if (job.name === REMINDER_JOB_NAME) {
-        return { reminded: await sendPlanReminders() };
+        // Location trails ride the reminder cadence rather than the daily one.
+        // spec §5.7 asks for auto-expiry when a plan ends, and a daily sweep
+        // would leave a cancelled evening's trail sitting for hours.
+        const [reminded, trails, completed] = await Promise.all([
+          sendPlanReminders(),
+          sweepLiveLocations(),
+          sweepCompletedPlans(),
+        ]);
+
+        return { reminded, trails_pruned: trails, plans_completed: completed };
       }
 
       if (job.name === SCHEDULER_JOB_NAME) {
