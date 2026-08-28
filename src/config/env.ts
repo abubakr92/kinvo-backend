@@ -144,6 +144,20 @@ export const envSchema = z.object({
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
 
   /**
+   * Amazon SES (spec §3, Batch 11).
+   *
+   * Preferred over SMTP because it needs no static credentials: the instance
+   * role signs the calls, exactly as it does for S3. Setting a sender address
+   * is what switches email on.
+   *
+   * SES suppresses bounced and complained addresses at the ACCOUNT level, so
+   * the application keeps no suppression list of its own — the platform
+   * refuses to send to a dead address without being asked.
+   */
+  SES_SENDER_ADDRESS: z.string().optional(),
+  SES_CONFIGURATION_SET: z.string().optional(),
+
+  /**
    * SMTP. All four must be present together or email falls back to a no-op —
    * a half-configured transport fails at send time, which is the worst place
    * to discover it.

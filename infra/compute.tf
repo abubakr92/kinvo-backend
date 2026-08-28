@@ -110,6 +110,8 @@ resource "aws_instance" "api" {
     ecr_repository      = aws_ecr_repository.api.repository_url
     media_bucket        = aws_s3_bucket.media.id
     verification_bucket = aws_s3_bucket.verification.id
+    ses_sender_address  = var.ses_sender_address
+    ses_configuration_set = aws_sesv2_configuration_set.main.configuration_set_name
     domain_name         = var.domain_name
     log_level           = var.log_level
   })

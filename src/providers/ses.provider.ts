@@ -29,6 +29,13 @@ export interface SesConfig {
   region: string;
   /** Must be a verified identity, or every send is rejected. */
   from: string;
+  /**
+   * Attributes sending to a named set, which is what makes bounce and
+   * complaint rates visible per-set in CloudWatch. Without it the events still
+   * fire but land in the account-wide bucket, where transactional mail cannot
+   * be told apart from anything else.
+   */
+  configurationSet?: string;
 }
 
 export class SesEmailProvider implements EmailProvider {
@@ -37,9 +44,11 @@ export class SesEmailProvider implements EmailProvider {
 
   private readonly client: SESv2Client;
   private readonly from: string;
+  private readonly configurationSet: string | undefined;
 
   constructor(config: SesConfig) {
     this.from = config.from;
+    this.configurationSet = config.configurationSet;
     // No credentials passed: the SDK resolves the instance role on EC2 and the
     // shared profile locally. Passing keys here would defeat the point.
     this.client = new SESv2Client({ region: config.region });
@@ -51,14 +60,13 @@ export class SesEmailProvider implements EmailProvider {
         new SendEmailCommand({
           FromEmailAddress: this.from,
           Destination: { ToAddresses: [message.to] },
+          ...(this.configurationSet ? { ConfigurationSetName: this.configurationSet } : {}),
           Content: {
             Simple: {
               Subject: { Data: message.subject, Charset: 'UTF-8' },
               Body: {
                 Text: { Data: message.text, Charset: 'UTF-8' },
-                ...(message.html
-                  ? { Html: { Data: message.html, Charset: 'UTF-8' } }
-                  : {}),
+                ...(message.html ? { Html: { Data: message.html, Charset: 'UTF-8' } } : {}),
               },
             },
           },

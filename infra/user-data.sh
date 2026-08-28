@@ -89,6 +89,10 @@ MEDIA_AUTO_APPROVE_UPLOADS=false
 # honest. MUST become true the moment real users can sign in.
 REQUIRE_THIRD_PARTY_INTEGRATIONS=false
 
+# Email through SES. No credentials: the instance role signs the calls.
+SES_SENDER_ADDRESS=${ses_sender_address}
+SES_CONFIGURATION_SET=${ses_configuration_set}
+
 # No S3 keys. The instance role supplies credentials, so there is no long-lived
 # secret on the box at all.
 ENVFILE

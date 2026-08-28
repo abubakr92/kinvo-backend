@@ -66,8 +66,8 @@ resource "aws_cloudfront_distribution" "api" {
     origin_id   = "api"
 
     custom_origin_config {
-      http_port              = 80
-      https_port             = 443
+      http_port  = 80
+      https_port = 443
       # http-only until a domain exists: a public certificate authority will not
       # issue for a bare IP, so there is nothing for CloudFront to validate.
       # The hop is inside AWS's network and, with the security group and the

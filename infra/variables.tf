@@ -84,3 +84,15 @@ variable "log_level" {
   type        = string
   default     = "info"
 }
+
+variable "ses_sender_address" {
+  description = <<-DESC
+    The verified SES sender.
+
+    A bare address until a domain exists. Verified out of band, because AWS
+    emails a confirmation link a human has to click — Terraform can create the
+    identity but cannot complete it.
+  DESC
+  type        = string
+  default     = "cintrasoftwaresolutions@gmail.com"
+}

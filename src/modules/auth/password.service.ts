@@ -1,6 +1,6 @@
 import argon2 from 'argon2';
 
-import { env } from '@config/env';
+import { env, isTest } from '@config/env';
 import { prisma } from '@/db/prisma';
 import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
@@ -15,12 +15,34 @@ import { generateSecureToken, sha256 } from '@utils/hash';
  * These are the library defaults, stated explicitly so a future change is a
  * visible decision rather than a silent dependency upgrade.
  */
-const ARGON2_OPTIONS = {
+const PRODUCTION_OPTIONS = {
   type: argon2.argon2id,
   memoryCost: 65536, // 64 MiB
   timeCost: 3,
   parallelism: 4,
 } as const;
+
+/**
+ * Deliberately weak parameters, USED ONLY UNDER TEST.
+ *
+ * A production hash costs ~540ms by design; that cost IS the security property.
+ * The suite hashes a password for nearly every fixture, which put roughly a
+ * third of a fifteen-minute run inside argon2 — time that proves nothing, since
+ * no test asserts how slow hashing is.
+ *
+ * These are the lowest values argon2 accepts. They are catastrophic for real
+ * passwords, which is why the switch reads `isTest` and nothing else: there is
+ * no environment variable to set wrong, and no way to reach them from a
+ * deployed environment.
+ */
+const TEST_OPTIONS = {
+  type: argon2.argon2id,
+  memoryCost: 8192, // 8 MiB, the argon2 minimum for this parallelism
+  timeCost: 2,
+  parallelism: 1,
+} as const;
+
+const ARGON2_OPTIONS = isTest ? TEST_OPTIONS : PRODUCTION_OPTIONS;
 
 export async function hashPassword(plain: string): Promise<string> {
   return argon2.hash(plain, ARGON2_OPTIONS);

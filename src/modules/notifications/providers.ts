@@ -6,6 +6,7 @@ import {
   NoopEmailProvider,
   SmtpEmailProvider,
 } from '@/providers/email.provider';
+import { SesEmailProvider } from '@/providers/ses.provider';
 import { logger } from '@utils/logger';
 
 /**
@@ -39,7 +40,16 @@ export function getPushProvider(): PushProvider {
 
 export function getEmailProvider(): EmailProvider {
   if (!email) {
-    if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_FROM) {
+    // SES first: it authenticates with the instance role, so there is no
+    // long-lived password on the box. SMTP remains as an escape hatch for an
+    // environment that is not on AWS.
+    if (env.SES_SENDER_ADDRESS) {
+      email = new SesEmailProvider({
+        region: env.S3_REGION,
+        from: env.SES_SENDER_ADDRESS,
+        configurationSet: env.SES_CONFIGURATION_SET,
+      });
+    } else if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_FROM) {
       email = new SmtpEmailProvider({
         host: env.SMTP_HOST,
         port: env.SMTP_PORT,
