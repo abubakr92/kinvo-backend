@@ -38,7 +38,28 @@ export function createApp(): Express {
   );
   app.use(compression());
 
-  app.use(express.json({ limit: env.JSON_BODY_LIMIT }));
+  /**
+   * Everything EXCEPT webhooks gets a parsed JSON body.
+   *
+   * A provider signs the raw bytes it sent. Parsing and re-serialising changes
+   * them — key order, whitespace, number formatting — so a webhook that has
+   * been through express.json() can never verify, and the failure looks like a
+   * bad secret rather than a middleware ordering problem.
+   *
+   * The webhook router applies express.raw() itself. This skip is what leaves
+   * it something to apply it to.
+   */
+  const WEBHOOK_PREFIX = `${API_PREFIX}/webhooks`;
+
+  app.use((req, res, next) => {
+    if (req.path.startsWith(WEBHOOK_PREFIX)) {
+      next();
+      return;
+    }
+
+    express.json({ limit: env.JSON_BODY_LIMIT })(req, res, next);
+  });
+
   app.use(express.urlencoded({ extended: true, limit: env.JSON_BODY_LIMIT }));
 
   app.use(requestLogger);

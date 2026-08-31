@@ -1691,6 +1691,27 @@ model ModerationFlag {
   @@map("moderation_flags")
 }
 
+/// Every provider webhook already applied, by the provider's own event id.
+///
+/// spec §5.10: "Handle every notification idempotently — both stores retry, and
+/// duplicates are normal." Stripe is no different. The unique constraint is
+/// what makes a concurrent duplicate a no-op rather than a double-apply, which
+/// on a refund event would be the difference between removing access once and
+/// removing it twice while a renewal lands in between.
+model ProcessedWebhookEvent {
+  id String @id @default(uuid(4)) @db.Uuid
+
+  source     PaymentSource
+  event_id   String        @db.VarChar(255)
+  event_type String        @db.VarChar(100)
+
+  created_at DateTime @default(now())
+
+  @@unique([source, event_id])
+  @@index([created_at])
+  @@map("processed_webhook_events")
+}
+
 // ============================================================================
 // ADMIN  (spec §7, Batch 15)
 // ============================================================================

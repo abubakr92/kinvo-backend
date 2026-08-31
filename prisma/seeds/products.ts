@@ -3,17 +3,22 @@ import { BillingCycle, SubscriptionTier, prisma } from '@/db/prisma';
 /**
  * Subscription products (spec §5.10) — one logical product, three store SKUs.
  *
- * PROVISIONAL. Open decision #3 asks whether six SKUs ship (tier × cycle, per
- * the source doc) or two (per the Premium screen: $19/mo, $99/yr). All six are
- * seeded here because deactivating a row is trivial and adding one later means
- * new App Store Connect and Play Console configuration.
+ * FOUR products: two tiers, monthly and yearly. Decided by the product owner
+ * on 2026-08-28 (DECISIONS.md §1.2o), replacing the six provisional SKUs.
  *
- * The store product identifiers below are placeholders. Real ones are created
- * in App Store Connect and Play Console and must be pasted in before Batch 13.
+ * Quarterly was dropped because it sells to nobody: someone weighing a
+ * commitment picks monthly, and someone convinced picks yearly for the
+ * discount. Weekly was never added — it is a churn machine.
  *
- * PriceVersion rows are INFORMATIONAL ONLY. With IAP the stores own the actual
- * charge; the backend records price history for reporting and grandfathering
- * and cannot change what a user is billed (spec §5.10, decision #3).
+ * Apple and Google identifiers are NULL. Both stores are out of scope; the
+ * mobile team owns them (§1.2j, §1.2l). The columns stay so a store can be
+ * added later without a migration.
+ *
+ * PriceVersion rows are effective-dated so a price change is a new row and the
+ * old one survives for grandfathering and reporting. With Stripe these are
+ * NOT merely informational — unlike IAP, we set the price, so the amount here
+ * is expected to match the Stripe price it points at. Stripe remains the
+ * authority on what is actually charged.
  */
 
 interface ProductSeed {
@@ -36,19 +41,13 @@ const PRODUCTS: ProductSeed[] = [
     currency: 'USD',
   },
   {
-    slug: 'basic_quarterly',
-    name: 'Kinvo Basic — Quarterly',
-    tier: SubscriptionTier.basic,
-    billing_cycle: BillingCycle.quarterly,
-    amount_minor: 2499,
-    currency: 'USD',
-  },
-  {
+    // A third off the monthly rate, which is the discount that makes an annual
+    // plan worth offering at all.
     slug: 'basic_yearly',
     name: 'Kinvo Basic — Yearly',
     tier: SubscriptionTier.basic,
     billing_cycle: BillingCycle.yearly,
-    amount_minor: 5999,
+    amount_minor: 7999,
     currency: 'USD',
   },
   {
@@ -56,15 +55,7 @@ const PRODUCTS: ProductSeed[] = [
     name: 'Kinvo Premium — Monthly',
     tier: SubscriptionTier.advanced,
     billing_cycle: BillingCycle.monthly,
-    amount_minor: 1900,
-    currency: 'USD',
-  },
-  {
-    slug: 'advanced_quarterly',
-    name: 'Kinvo Premium — Quarterly',
-    tier: SubscriptionTier.advanced,
-    billing_cycle: BillingCycle.quarterly,
-    amount_minor: 4900,
+    amount_minor: 1999,
     currency: 'USD',
   },
   {
@@ -72,12 +63,20 @@ const PRODUCTS: ProductSeed[] = [
     name: 'Kinvo Premium — Yearly',
     tier: SubscriptionTier.advanced,
     billing_cycle: BillingCycle.yearly,
-    amount_minor: 9900,
+    amount_minor: 15999,
     currency: 'USD',
   },
 ];
 
 export async function seedProducts(): Promise<{ products: number }> {
+  // Quarterly products were seeded before the four-SKU decision. Deactivated
+  // rather than deleted: a deleted product breaks the foreign key on any
+  // subscription that ever referenced it, and price history is worth keeping.
+  await prisma.subscriptionProduct.updateMany({
+    where: { slug: { notIn: PRODUCTS.map((product) => product.slug) } },
+    data: { is_active: false },
+  });
+
   for (const [index, product] of PRODUCTS.entries()) {
     const record = await prisma.subscriptionProduct.upsert({
       where: { slug: product.slug },
@@ -86,9 +85,13 @@ export async function seedProducts(): Promise<{ products: number }> {
         name: product.name,
         tier: product.tier,
         billing_cycle: product.billing_cycle,
-        // Placeholders — replace with the real store identifiers in Batch 13.
-        apple_product_id: `com.kinvo.app.${product.slug}`,
-        google_product_id: `kinvo_${product.slug}`,
+        // Both stores are out of scope — the mobile team owns them. Null
+        // rather than a placeholder, because a placeholder that looks like a
+        // real identifier is how a lookup silently matches the wrong product.
+        apple_product_id: null,
+        google_product_id: null,
+        // Set from the real Stripe dashboard price id once the account exists.
+        // Until then checkout answers 404 for the plan, which is honest.
         stripe_price_id: null,
         sort_order: index,
       },
@@ -106,7 +109,7 @@ export async function seedProducts(): Promise<{ products: number }> {
           amount_minor: product.amount_minor,
           currency: product.currency,
           effective_from: new Date('2026-01-01T00:00:00Z'),
-          note: 'Seeded placeholder. The store owns the actual charge (spec §5.10).',
+          note: 'Seeded price. Stripe is the authority on what is charged (spec §5.10).',
         },
       });
     }

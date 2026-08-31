@@ -3,6 +3,7 @@ import { Mode, VerificationStatus, prisma } from '@/db/prisma';
 import { closeDatabase, resetDatabase } from '../../helpers/db';
 import { authHeader, createAuthenticatedUser } from '../../helpers/auth';
 import { api, expectErrorEnvelope, expectSuccessEnvelope } from '../../helpers/request';
+import { setTier } from '../../helpers/entitlements';
 
 /**
  * The eight modes (spec §1, §5.2).
@@ -292,7 +293,11 @@ describe('the entitlement cap', () => {
 
   it('treats -1 as unlimited', async () => {
     const { tokens, user_id: userId } = await createAuthenticatedUser();
-    await prisma.user.update({ where: { id: userId }, data: { subscription_tier: 'advanced' } });
+    // Through the helper, which creates a real subscription. Writing
+    // `subscription_tier` directly stopped granting anything in Batch 13 —
+    // entitlement resolves from Subscription rows now, because a column
+    // somebody can edit is not an entitlement.
+    await setTier(userId, 'advanced');
     await verify(userId);
 
     const auth = authHeader(tokens);

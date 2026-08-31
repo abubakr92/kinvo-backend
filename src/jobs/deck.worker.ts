@@ -6,6 +6,7 @@ import { sweepExpiredMatches } from '@modules/matches/matches.service';
 import { sendPlanReminders } from '@modules/notifications/reminders.service';
 import { sweepLiveLocations } from '@modules/safety/location.service';
 import { sweepCompletedPlans } from '@modules/plans/plans.service';
+import { sweepExpiredSubscriptions } from '@modules/subscriptions/subscriptions.service';
 import { logger } from '@utils/logger';
 import { QUEUE_NAMES, type DeckGenerationJob, getDeckQueue, jobConnection } from './queues';
 
@@ -57,8 +58,16 @@ export function startDeckWorker(): Worker<DeckGenerationJob> {
         // expired at read time, so this job being late or never running
         // changes nothing a user can see. It exists so admin lists and
         // analytics can filter on the column.
-        const [enqueued, expired] = await Promise.all([enqueueDailyDecks(), sweepExpiredMatches()]);
-        return { enqueued, expired };
+        // Subscription expiry is bookkeeping for the same reason: entitlement
+        // checks the paid period directly, so a late sweep can never hand out
+        // free premium.
+        const [enqueued, expired, lapsed] = await Promise.all([
+          enqueueDailyDecks(),
+          sweepExpiredMatches(),
+          sweepExpiredSubscriptions(),
+        ]);
+
+        return { enqueued, expired, lapsed_subscriptions: lapsed };
       }
 
       const { user_id, mode } = job.data;

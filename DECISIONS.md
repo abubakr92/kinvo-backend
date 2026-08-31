@@ -185,7 +185,27 @@ listed with what it costs to change later.
 | **Blocking unmatches; unblocking does NOT restore the match.** | 2026-08-28 | PO-confirmed | A block alone leaves the match visible and frozen, which is right for a lapsed match and wrong for one deliberately cut. Unblocking means "I am willing to see this person again", not "undo everything" — and the pair can simply match again. |
 | **Venue suggestions centre on the CALLER's location, not a midpoint.** | 2026-08-28 | PO-confirmed | A midpoint sounds fairer but requires reading the other person's coordinates to compute, and exposing where someone lives — even indirectly, through which venues appear — is not worth the convenience. |
 
-### 1.3 Still open — must be answered before the batch listed
+### 1.2n Resolved during Batch 13 (subscriptions)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Four SKUs: Basic and Premium, monthly and yearly.** $9.99 / $79.99 / $19.99 / $159.99 USD. | 2026-08-28 | PO | Quarterly sells to nobody — someone weighing a commitment picks monthly, someone convinced picks yearly for the discount. Annual is a third off, which is what makes it worth offering. Weekly was never added; it is a churn machine. |
+| **No free trial in v1.** | 2026-08-28 | PO | Adds trial-to-paid conversion, trial abuse, and an extra lifecycle state. Easy to add later, hard to remove once people expect it. |
+| **Tier matrix unchanged from the Batch 6 provisional.** | 2026-08-28 | PO | See-who-liked-you, boost, and extend-matches stay Advanced-only: they are what people upgrade to Advanced FOR, and moving them to Basic removes most of the reason Advanced exists. |
+| **Entitlement resolves from Subscription rows, not `user.subscription_tier`.** | 2026-08-28 | Eng | Spec §5.10 asks for this explicitly. A column somebody can edit is not an entitlement. The column survives as a denormalised copy for admin lists. This broke 28 tests that granted premium by writing the column — which is the change working: had entitlements kept the column as a fallback, all 28 would have passed and a writable premium switch would have shipped. |
+| **Checkout accepts a product SLUG and nothing else.** | 2026-08-28 | Eng | No tier, no price, no receipt. The schema is `.strict()`, so a client sending `tier: advanced` gets a 400 rather than being quietly ignored. Spec §5.10: "a client-trusting implementation is trivially exploitable and will be exploited." |
+| **Cancelled, grace-period, and billing-retry all KEEP access.** | 2026-08-28 | Eng | Cancelling means "do not renew" and the period is already paid for. A card that needed reissuing must not cost the customer and the payment. Access ends on `current_period_end`, checked at read time. |
+| **Refund and dispute revoke access immediately.** | 2026-08-28 | Eng | Spec §5.10: a refunded user keeping premium is a straightforward revenue leak. A dispute is treated the same — the money is gone either way, and waiting for the outcome means weeks of free access. |
+| **Webhook idempotency by provider event id, in its own table.** | 2026-08-28 | Eng | Both Stripe and the stores retry; duplicates are routine. The unique constraint is what makes a concurrent duplicate a no-op rather than a double-apply. |
+| **`express.json()` skips `/webhooks/*`.** | 2026-08-28 | Eng | Caught before shipping. The global parser ran before the router, so the webhook would have received a parsed object instead of raw bytes and EVERY Stripe signature would have failed — presenting as a wrong webhook secret rather than a middleware ordering bug. |
+
+### 1.3 Still open
+
+**Carried from Batch 13:**
+
+- **Make `seedEntitlements` atomic.** It is a loop of independent statements — upsert a flag, upsert its three tier rows, repeat — so an interruption leaves the matrix half-applied. Because a missing flag fails CLOSED, the symptom is a paid feature silently switched off rather than an error. Written and reverted unverified; re-apply once the suite can run.
+- **Build and adopt `Dockerfile.test`.** The suite cannot run natively on the current host. This also belongs in CI regardless.
+ — must be answered before the batch listed
 
 | #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
 | --- | ---------------------------------------------------------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -491,6 +511,21 @@ Four gaps closed before starting Batch 11. All $0.
 
 **Test-infrastructure note.** Two social-auth tests failed on `beforeEach(resetDatabase)` exceeding the 30-second hook timeout — a single TRUNCATE. They passed in isolation immediately afterwards, and the full run took 47 minutes against roughly 14 earlier in the project. The cause is host degradation (see §1.2n), not the code. The jest timeout was raised to 60s as a ceiling, not a delay.
 
+### 2026-08-31 — Batch 13: Subscriptions (Stripe)
+
+- 6 endpoints plus the webhook. 119 endpoints total. Apple and Google are out of scope; the `PaymentProvider` interface exists anyway so adding a store later is a new class and nothing else.
+- Entitlement resolution moved off the editable column onto Subscription rows, completing the switch spec §5.10 asks for.
+- Products reduced from six provisional SKUs to four. The dropped ones are DEACTIVATED, not deleted: deleting a product breaks the foreign key on any subscription that ever referenced it, and price history is worth keeping.
+- `ProcessedWebhookEvent` migration was written BY HAND and applied with psql, because Prisma's schema engine is blocked on this host (see below). The SQL is what `migrate dev` would have produced, and the ledger row was inserted so schema and history agree. The same hand-written approach already applies to the GIST indexes.
+
+**Host degradation — the reason this batch shipped the way it did.**
+
+Windows Smart App Control moved to Enforced on the development machine partway through this project and progressively blocked unsigned native binaries: first Prisma's schema engine (worked around in globalSetup), then argon2's binding, at which point the test suite could not start at all. Docker was then also unusable — an `apt-get update` ran for over thirty minutes and a bare `docker run node openssl version` timed out.
+
+A Linux test-runner image (`Dockerfile.test`) is committed as the permanent answer and belongs in CI, but it could not be built on this host today.
+
+What shipped is therefore EXACTLY the tree that last ran green at 934/934 across 49 suites. One later change — making the entitlement seed atomic — was reverted rather than committed unverified. It addressed a flake that did not reproduce, and shipping the payments batch verified is worth more than shipping an unverified robustness tweak. It is recorded in §1.3 as outstanding.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -511,7 +546,7 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 10    | Moderation                  | ✅     | Moderation provider account                                  | **#8**                         |
 | 11    | Notifications               | ✅     | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ✅     | S3 (report evidence)                                         | Block visibility               |
-| 13    | Subscriptions (Stripe only) | ▶      | Stripe account                                               | **#2, #3**                     |
+| 13    | Subscriptions (Stripe only) | ✅     | Stripe account                                               | **#2, #3**                     |
 | 14    | Video calling               | ⬜     | **Twilio Video credentials**                                 | —                              |
 | 15    | Admin, docs, hardening      | ⬜     | —                                                            | **#12**                        |
 

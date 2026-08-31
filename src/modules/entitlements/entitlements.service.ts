@@ -116,14 +116,26 @@ export interface ResolvedEntitlements {
 export async function resolve(userId: string): Promise<ResolvedEntitlements> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { subscription_tier: true },
+    select: { id: true },
   });
 
   if (!user) {
     throw ApiError.notFound();
   }
 
-  return { tier: user.subscription_tier, flags: await loadMatrix(user.subscription_tier) };
+  // Batch 13 moved this off the `subscription_tier` column. That column is
+  // still maintained as a denormalised copy for admin lists, but a column
+  // somebody can edit is not an entitlement — the tier is now derived from
+  // Subscription rows, which are only ever written by a signature-verified
+  // provider event.
+  //
+  // Imported lazily: subscriptions.service imports the notification service,
+  // which imports the realtime emitters, and a top-level import here would
+  // close that loop.
+  const { resolveTier } = await import('@modules/subscriptions/subscriptions.service');
+  const tier = await resolveTier(userId);
+
+  return { tier, flags: await loadMatrix(tier) };
 }
 
 /** True when the user's tier includes a boolean feature. */

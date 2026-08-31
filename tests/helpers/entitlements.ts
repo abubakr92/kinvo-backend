@@ -31,7 +31,52 @@ export async function setFlag(
   clearEntitlementCache();
 }
 
+/**
+ * Puts a user on a tier by giving them a real SUBSCRIPTION.
+ *
+ * This used to set `user.subscription_tier` directly. Batch 13 moved
+ * entitlement resolution onto Subscription rows — a column somebody can edit is
+ * not an entitlement — so writing the column now grants nothing, and a helper
+ * that did it would quietly stop working while every test still passed the
+ * moment it also asserted "free".
+ *
+ * Creating the row instead means these tests exercise the same path a real
+ * payment takes.
+ */
 export async function setTier(userId: string, tier: SubscriptionTier): Promise<void> {
+  if (tier === 'free') {
+    await prisma.subscription.deleteMany({ where: { user_id: userId } });
+    await prisma.user.update({ where: { id: userId }, data: { subscription_tier: tier } });
+    return;
+  }
+
+  const product = await prisma.subscriptionProduct.upsert({
+    where: { tier_billing_cycle: { tier, billing_cycle: 'monthly' } },
+    create: {
+      slug: `test_${tier}_monthly`,
+      name: `Test ${tier}`,
+      tier,
+      billing_cycle: 'monthly',
+    },
+    update: {},
+  });
+
+  const now = new Date();
+
+  await prisma.subscription.create({
+    data: {
+      user_id: userId,
+      product_id: product.id,
+      status: 'active',
+      source: 'stripe',
+      original_transaction_id: `test_sub_${userId}_${tier}`,
+      current_period_start: now,
+      current_period_end: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      auto_renew: true,
+    },
+  });
+
+  // The denormalised copy, kept in step for admin lists.
   await prisma.user.update({ where: { id: userId }, data: { subscription_tier: tier } });
 }
 

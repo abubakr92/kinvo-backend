@@ -29,6 +29,7 @@ import {
   sharePlanSchema,
   updatePlanSchema,
 } from '@modules/plans/plans.schema';
+import { checkoutSchema, portalSchema } from '@modules/subscriptions/subscriptions.schema';
 import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
@@ -1079,6 +1080,69 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
   },
+  // --- subscriptions ------------------------------------------------------
+  {
+    method: 'get',
+    path: '/subscriptions/products',
+    tag: 'Subscriptions',
+    summary: 'What is on sale',
+    description:
+      'Four products: Basic and Premium, monthly and yearly. Prices are integer MINOR UNITS plus a currency — never floats. Readable without a token, because the paywall is shown before some sign-in flows. Apple and Google identifiers are null: both stores belong to the mobile team.',
+    auth: false,
+    errors: [],
+  },
+  {
+    method: 'get',
+    path: '/subscriptions/me',
+    tag: 'Subscriptions',
+    summary: 'Your subscription',
+    description:
+      'Read `is_active` rather than inferring from `status`: a cancelled subscription is still active until its period ends, and one in billing retry still entitles.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'post',
+    path: '/subscriptions/checkout',
+    tag: 'Subscriptions',
+    summary: 'Start a purchase',
+    description:
+      '**Grants nothing.** Returns a hosted checkout URL; the user is not subscribed until Stripe says so through a signature-verified webhook. The body names a product SLUG and nothing else — no tier, no price, no receipt — because the server must never take entitlement from a client claim (spec §5.10).',
+    body: checkoutSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.NOT_FOUND, E.SERVICE_UNAVAILABLE],
+  },
+  {
+    method: 'post',
+    path: '/subscriptions/portal',
+    tag: 'Subscriptions',
+    summary: 'Manage billing',
+    description:
+      'A link to Stripe\u2019s own portal, where the user cancels or changes a card. Building that here would mean handling card details.',
+    body: portalSchema,
+    auth: true,
+    errors: [E.NOT_FOUND, E.VALIDATION_FAILED],
+  },
+  {
+    method: 'post',
+    path: '/subscriptions/restore',
+    tag: 'Subscriptions',
+    summary: 'Restore purchases',
+    description:
+      'Re-reads state from Stripe, never from anything the client sent — that is what makes it a restore rather than a way to claim a subscription. Entitlement belongs to the USER, so a purchase made in one session resolves in any other.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'post',
+    path: '/webhooks/stripe',
+    tag: 'Subscriptions',
+    summary: 'Stripe webhook',
+    description:
+      '**The only endpoint that changes entitlement.** Requires a valid `stripe-signature` over the RAW body — the JSON parser is deliberately skipped for this path, because parsing and re-serialising changes the bytes the signature covers. Processing is idempotent by Stripe event id, since retries and duplicates are routine. Answers 400 on a bad signature so Stripe stops retrying and flags the endpoint; 200 for events we deliberately ignore.',
+    auth: false,
+    errors: [E.BAD_REQUEST],
+  },
   // --- entitlements -------------------------------------------------------
   {
     method: 'get',
@@ -1444,6 +1508,10 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       },
       { name: 'Plans', description: 'Date planning and trusted-contact sharing' },
       { name: 'Venues', description: 'Curated places, search, save, suggest' },
+      {
+        name: 'Subscriptions',
+        description: 'Products, checkout, billing portal, Stripe webhook',
+      },
       {
         name: 'Entitlements',
         description: 'Plan features and daily quotas',

@@ -144,6 +144,24 @@ export const envSchema = z.object({
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
 
   /**
+   * Stripe (spec §5.10, Batch 13).
+   *
+   * Absent, payment endpoints answer SERVICE_UNAVAILABLE. That is deliberately
+   * NOT the quiet fallback push and email use: a payment that silently does
+   * nothing is far worse than one that fails loudly, and there is no feed row
+   * to fall back on.
+   *
+   * The webhook secret is separate from the API key because they are rotated
+   * independently, and because a webhook endpoint with no secret must refuse
+   * every request rather than trust an unsigned one.
+   */
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  /** Where Stripe returns the user after checkout. */
+  STRIPE_SUCCESS_URL: z.string().optional(),
+  STRIPE_CANCEL_URL: z.string().optional(),
+
+  /**
    * Amazon SES (spec §3, Batch 11).
    *
    * Preferred over SMTP because it needs no static credentials: the instance
