@@ -95,7 +95,11 @@ export async function seedProducts(): Promise<{ products: number }> {
         stripe_price_id: null,
         sort_order: index,
       },
-      update: { name: product.name, sort_order: index },
+      // is_active is set here too, not just on create. The updateMany above
+      // deactivates anything absent from PRODUCTS, so without this the seed is
+      // one-way: a product removed and later restored would stay invisible,
+      // and the only symptom is a plan missing from the paywall.
+      update: { name: product.name, sort_order: index, is_active: true },
     });
 
     const existing = await prisma.priceVersion.findFirst({
