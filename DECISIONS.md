@@ -482,6 +482,58 @@ A Linux test-runner image (`Dockerfile.test`) is committed as the permanent answ
 
 What shipped is therefore EXACTLY the tree that last ran green at 934/934 across 49 suites. One later change — making the entitlement seed atomic — was reverted rather than committed unverified. It addressed a flake that did not reproduce, and shipping the payments batch verified is worth more than shipping an unverified robustness tweak. It is recorded in §1.3 as outstanding.
 
+### 2026-08-31 — Batch 13 deployed and verified on staging
+
+118 endpoints live. Six of them are Batch 13: products, me, checkout, portal,
+restore, and the Stripe webhook.
+
+**The guarantee this batch exists to make, verified against the deployed build.**
+Entitlement must come from a Subscription row and never from a column somebody
+can edit. Proven directly on staging:
+
+| Database state | Resolved tier |
+| --- | --- |
+| `users.subscription_tier = advanced`, no subscription | **free** — the column grants nothing |
+| Active subscription on `advanced_monthly` | advanced |
+| Status `cancelled`, period still paid | **advanced** — cancelling means do not renew |
+| Status `on_billing_retry` | **advanced** — a card being reissued must not cost the feature |
+| `refunded_at` set | **free**, immediately |
+| `current_period_end` in the past | **free** — expiry is decided at read time, not by the sweep |
+
+Also confirmed: the webhook answers 400 to an unsigned body and to a forged
+signature; checkout rejects `{product_slug, tier}` with VALIDATION_FAILED
+naming `tier` as unrecognised, which is the `.strict()` schema refusing to let
+a client name its own tier. All test data removed afterwards; staging holds no
+subscription rows.
+
+32 parameterless GETs across every module return 2xx. The two exceptions are
+`/moderation/flags` and `/reports/review`, both 403 for a non-moderator, which
+is correct.
+
+**Staging was serving the wrong catalogue, and re-seeding would not have fixed it.**
+It still had the six provisional SKUs at the old prices. Two bugs in
+`seedProducts`, both found by verifying rather than by any test:
+
+1. The upsert deactivated products missing from the list but never reactivated
+   ones that returned — a product pulled and restored would stay invisible, and
+   `listProducts` filters on `is_active`, so the only symptom is a plan quietly
+   missing from the paywall.
+2. A PriceVersion was created only when none was open, so the seed could
+   introduce a price but never correct one. Any environment seeded before a
+   pricing decision kept the old amount forever while re-seeding reported
+   success.
+
+Both fixed. A price change now closes the open version and opens a new one in
+one transaction — a new row, never an edit, because the old amount has to
+survive for grandfathering and for reconciling what people were actually
+charged. Staging was corrected through the same mechanism and now quotes
+999 / 7999 / 1999 / 15999, with the superseded amounts retained as closed rows.
+
+The production image carries no `tsx`, so `prisma/seed.ts` cannot run there.
+The correction went in as SQL mirroring the seed exactly. **Seeding a deployed
+environment has no supported path today** — worth fixing before there is data
+worth protecting.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
