@@ -158,6 +158,17 @@ Never widen `req.user` from a token claim. `authenticate` loads the user on ever
 
 **Redis in tests.** The client uses `lazyConnect` with the offline queue **disabled** under test, so a command issued before an explicit `connectRedis()` fails instead of buffering. Any suite touching quota counters must call it in `beforeAll` and `disconnectRedis()` in `afterAll`. Skipping it does not fail loudly — `readCount` swallows connection errors and reports zero used, which looks exactly like a fresh counter, so the suite passes while proving nothing. Never wrap a live Redis call in `jest.useFakeTimers()`: ioredis drives its command queue on real timers and the call never resolves.
 
+**Subscriptions (spec §5.10).** Never grant entitlement from a client claim.
+
+- Checkout accepts a product **slug** and nothing else — no tier, no price, no receipt. The schema is `.strict()`, so a client sending `tier: advanced` gets a 400 rather than being quietly ignored.
+- Access changes in exactly one function, `applyProviderEvent`, reachable only from a signature-verified webhook. If a second path to granting access appears, that is the bug.
+- The webhook route is **excluded from `express.json()`** in `app.ts`. Stripe signs the raw bytes; parsing and re-serialising changes them, and every signature fails in a way that reads like a wrong webhook secret.
+- Processing is idempotent by provider event id (`ProcessedWebhookEvent`). Providers retry; duplicates are routine, and the unique constraint is what makes a concurrent duplicate a no-op instead of a double-apply.
+- `cancelled`, `in_grace_period` and `on_billing_retry` **keep** access — the period is paid for, and a card that needs reissuing must not cost the customer both the money and the feature. Refunds and disputes revoke **immediately**.
+- Access ends on `current_period_end`, checked at read time. The nightly sweep is bookkeeping, so a late or failed sweep can never hand out free premium.
+- Entitlement resolves from **Subscription rows**, never `user.subscription_tier` — that column is a denormalised copy for admin lists. A column somebody can edit is not an entitlement.
+
+**Money.** Integer minor units plus a currency code. Never a float, never a formatted string.
 **Blocks (spec 5.5).** Blocks beat everything. The shared exclusion clause lives in `src/modules/safety/block.service.ts` and **must never be re-implemented**:
 
 - `visibleUserFilter(viewerId, blockedIds)` — compose into the `where` of any query that can surface another user. It already excludes blocked-either-direction, self, suspended, soft-deleted, and snoozed.
@@ -270,26 +281,30 @@ When blocked, ask. Do not invent a business rule and bury it in code.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Database:** PostgreSQL + PostGIS. S3 for media bytes only — never application records.                                                                  |
 | 4   | **Trading mode:** interest category only, no trading functionality.                                                                                       |
-| 13  | **Payment rails:** Apple IAP + Google Play Billing primary; Stripe as an optional US-only link-out.                                                       |
+| 13  | **Payment rails: Stripe only.** Apple IAP and Google Play Billing are out of scope — both stores belong to the mobile team. The `PaymentProvider` interface exists anyway, so adding a store later is a new class and nothing else. |
+| 2,3 | **Four SKUs:** Basic and Premium × monthly and yearly. Annual is a third off. No quarterly (sells to nobody), no weekly (a churn machine), no free trial in v1. Tier matrix unchanged from the Batch 6 provisional. |
 | 5   | **"Requests" tab:** a **likes-you inbox** — profiles, not messages. Users cannot message before matching, so a conversation always has a match behind it. |
 | 11  | **Study Buddy groups:** one-to-one only in v1. Every conversation has exactly two participants.                                                           |
 | —   | **Runtime:** Node 24 instead of the spec's EOL Node 20.                                                                                                   |
 
 ## Still open — ask before the batch that needs them
 
-| #   | Question                                                                                | Blocks |
-| --- | --------------------------------------------------------------------------------------- | ------ |
-| 2   | Basic vs Advanced Premium — which features in which tier?                               | 13     |
-| 3   | Pricing shape — six SKUs or two?                                                        | 13     |
-| 6   | Match expiry TTL, and what expiry does to the conversation                              | 7      |
-| 7   | Free-tier daily swipe cap and message cap                                               | 7, 8   |
-| 8   | Moderation provider for "review before you send"                                        | 9      |
-| 9   | Should enabling Cuddle mode require verification?                                       | 5      |
-| 10  | Is Rewind free or premium?                                                              | 7      |
-| 12  | Admin analytics — which metrics?                                                        | 15     |
-| 14  | Ship the US Stripe link-out in v1, or IAP only?                                         | 13     |
-| —   | Block visibility: does a blocked pair's conversation stay visible read-only, or vanish? | 8, 12  |
-| —   | Profile photo URLs: CDN signed URLs vs expiring S3 presigned GETs                       | 4      |
+| #   | Question                                | Blocks | Status |
+| --- | --------------------------------------- | ------ | ------ |
+| 12  | Admin analytics — which metrics?        | 15     | The only decision still blocking a batch. |
+| —   | Cloudflare R2 instead of S3 for media   | —      | Not blocking. Same SDK, different endpoint; the argument is egress cost at real traffic. |
+
+**Shipped on engineering placeholders, not PO decisions** (DECISIONS.md §1.2e).
+The PO can still overrule any of these; the table records what each costs to change.
+
+| #   | Placeholder |
+| --- | ----------- |
+| 7   | Free tier: 50 swipes/day per mode, 30 messages/day. Seed edit. |
+| 10  | Rewind is premium (basic and above). Seed edit. |
+| 6   | Match expiry 14 days; the conversation goes read-only and stays visible. TTL is a constant; the conversation behaviour is **code**. |
+| 8   | Moderation is rules-based v1 behind a provider interface. Provider swap. |
+| —   | A blocked pair's conversation is frozen and visible; every other path 404s. **Code.** |
+| —   | Profile photo URLs are presigned S3 GETs, not CDN signed URLs — so Flutter's image cache misses on every render. |
 
 ---
 

@@ -205,84 +205,40 @@ listed with what it costs to change later.
 
 - **Make `seedEntitlements` atomic.** It is a loop of independent statements — upsert a flag, upsert its three tier rows, repeat — so an interruption leaves the matrix half-applied. Because a missing flag fails CLOSED, the symptom is a paid feature silently switched off rather than an error. Written and reverted unverified; re-apply once the suite can run.
 - **Build and adopt `Dockerfile.test`.** The suite cannot run natively on the current host. This also belongs in CI regardless.
- — must be answered before the batch listed
 
-| #   | Question                                                                                                   | Blocks batch   | Notes                                                                                                                                                                        |
-| --- | ---------------------------------------------------------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 6   | Match expiry TTL — how many days? **And what expiry does to the conversation.**                            | 7              | The spec asks only for the number. Eng flagged the missing half: does the conversation go read-only, vanish, or move to Archived? Does a new message reset the clock?        |
-| 7   | Free-tier daily swipe cap and message cap — numbers?                                                       | 7, 8           | Counter resets at UTC midnight (spec §5.3).                                                                                                                                  |
-| 10  | Is Rewind free or premium?                                                                                 | 7              |                                                                                                                                                                              |
-| —   | **Block visibility:** does a blocked pair's conversation stay visible read-only, or disappear entirely?    | 8, 12          | Spec §5.5 says read-only; spec §4.4 says return 404 so a block is not confirmed. These contradict. Eng recommends: conversation visible and frozen, 404 on every other path. |
-| —   | **Profile photo URLs:** CDN signed URLs vs expiring S3 presigned GETs.                                     | 4              | Presigned GETs expire and are unique per request, so Flutter's image cache misses on every render. Eng recommends CDN for photos, short presigned GETs for ID documents.     |
-| —   | **Cloudflare R2 instead of S3** for media bytes?                                                           | 4              | Identical API, no egress charges. For a photo-heavy app, egress is the fastest-growing line on the bill. Same SDK code, different endpoint.                                  |
-| 2   | Basic vs Advanced Premium — which features in which tier?                                                  | 13 (seed at 1) | Batch 1 seeds a **provisional** matrix with documented defaults. Because the matrix is data, filling these in later is a seed change, never a code change.                   |
-| 3   | Pricing shape — six SKUs (tier × cycle) or two?                                                            | 13             | Every SKU must be created in App Store Connect and Play Console. Store-set pricing means the spec's yearly-increase automation cannot work as written.                       |
-| 14  | Ship the US Stripe link-out in v1, or IAP only?                                                            | 13             | Eng recommends IAP-only for v1: always compliant, no region gating, and the US carve-out is under Supreme Court review.                                                      |
-| —   | RevenueCat as an abstraction over Apple and Google receipt validation?                                     | 13             | Spec §2 asks for this to be raised rather than adopted unilaterally.                                                                                                         |
-| 12  | Admin analytics — which metrics exactly?                                                                   | 15             |                                                                                                                                                                              |
+**Questions** — must be answered before the batch listed:
+
+| #   | Question | Blocks batch | Status |
+| --- | --- | --- | --- |
+| 12  | Admin analytics — which metrics exactly? | 15 | **Genuinely open.** The only decision still blocking a batch. |
+| —   | **Cloudflare R2 instead of S3** for media bytes? | — | **Open, not blocking.** Identical API, no egress charges; for a photo-heavy app egress is the fastest-growing line on the bill. Same SDK code, different endpoint — so it stays cheap to switch right up until there is real traffic. |
+| —   | **Profile photo URLs:** CDN signed URLs vs expiring S3 presigned GETs. | — | **Shipped as presigned GETs.** Works, but each URL is unique per request, so Flutter re-downloads every photo on every render. Revisit when the app is being tuned, not before. |
+
+**No longer open:**
+
+| # | Question | Where it was answered |
+| --- | --- | --- |
+| 2, 3, 14 | Tier split, pricing shape, Stripe-vs-IAP | §1.2n — four SKUs, matrix unchanged, Stripe only. |
+| 9 | Cuddle verification | §1.2c — required. |
+| 6, 7, 8, 10 | Match expiry, free caps, moderation provider, Rewind | §1.2e — **shipped on engineering placeholders, not PO decisions.** All but one are a seed edit or a config constant to change. What expiry does to the conversation is code. |
+| — | Block visibility | §1.2e — frozen and visible; 404 everywhere else. Also a placeholder. |
+| — | RevenueCat | Moot. It abstracts Apple and Google receipt validation, and neither store is in scope. |
 
 ---
 
 ### 1.4 Questions awaiting an answer — full options
 
-The table in 1.3 lists every open decision. This section spells out the four that
-block the next two batches, so the choice can be made without re-deriving the
-trade-offs. Delete a block once it is answered and move it to 1.2.
+**Emptied 2026-08-31.** This section held the full trade-off write-ups for the
+four decisions that blocked Batches 7, 8 and 13 — swipe cap, message cap, match
+expiry, and Rewind. All four are answered: the caps and Rewind in §1.2e as
+engineering placeholders, the pricing and tier questions in §1.2n by the PO.
 
----
+They are deleted rather than kept, because a page of options for a question that
+already has an answer is the kind of document that gets read as still-open and
+re-litigated. The answers, and what each costs to change, live in §1.2.
 
-#### Q1 — Free-tier daily swipe cap (decision #7, blocks Batch 7)
-
-How many swipes does a free user get per day, and is the counter per mode or
-shared across all enabled modes? Resets at UTC midnight either way (spec §5.3).
-
-| Option                             | Consequence                                                                                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **50 per mode** _(Eng recommends)_ | Each enabled mode has its own counter. Generous enough that casual users rarely hit it, tight enough to sell Premium.                                        |
-| 25 per mode                        | Users reach the paywall in one sitting. Converts faster; risks a new user exhausting the deck on day one and not returning.                                  |
-| 50 shared across all modes         | One counter for the account. Simpler to explain, but penalises multi-mode use — the exact behaviour the product exists to encourage.                         |
-| No cap at all                      | Monetise through see-who-liked-you, boost, and advanced filters instead. Contradicts spec §5.3, which mandates a cap, so this would be an explicit override. |
-
-**Dependency worth knowing:** per-mode versus shared only differs if free users
-can enable more than one mode at once. That is open decision #2, currently seeded
-as 1 mode for free. If free stays at one mode, the two options behave identically
-today and diverge only if that changes.
-
----
-
-#### Q2 — Free-tier daily message cap (decision #7, blocks Batch 8)
-
-Spec §5.4 mandates a cap. The number is not specified.
-
-| Option                                 | Consequence                                                                                                                                                                                               |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **30 messages/day** _(Eng recommends)_ | Across all conversations. Enough for a few real exchanges; a heavy day hits the wall. Balanced.                                                                                                           |
-| 50 messages/day                        | Rarely hit in normal use. The cap becomes anti-spam protection rather than a paywall lever; revenue leans on swipes and premium features instead.                                                         |
-| 10 messages/day                        | Forces payment to hold any real conversation. High conversion pressure, high risk users conclude the app does not work.                                                                                   |
-| Cap new conversations instead          | e.g. 5 new conversations/day, unlimited messages within them. Protects conversations already going, which is what users value. Deviates from the spec's wording; would be built as a separate quota type. |
-
----
-
-#### Q3 — Is Rewind free or premium? (decision #10, blocks Batch 7)
-
-Rewind reverses the last swipe in the current mode and restores the profile to
-the deck (spec §5.3).
-
-| Option                                                | Consequence                                                                                                                                        |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Premium only**                                      | Category standard and a reliable upsell — an accidental pass becomes a concrete reason to subscribe at the moment of regret. Strongest on revenue. |
-| Free, 1 per day _(Eng leans here on product grounds)_ | Covers the genuine mis-tap without giving the feature away, and teaches users it exists, which makes the premium version worth buying.             |
-| Free and unlimited                                    | Best experience, no revenue, and it weakens the deck: a user can undo backwards indefinitely, making "already swiped" exclusions leaky.            |
-
----
-
-#### Q4 — Should enabling Cuddle mode require verification? (decision #9, blocks Batch 5)
-
-| Option                                                               | Consequence                                                                                                                                                                 |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Yes, required to enable** _(Eng recommends, and so does the spec)_ | §5.7 flags Cuddle as elevated risk: it invites physical-contact meetups and will attract misuse. Far easier to require from day one than to impose later on existing users. |
-| Yes, but only to message                                             | Browse the deck unverified; verify before a match can become a conversation. Lower signup friction, protection at the point where risk actually begins.                     |
-| No, treat it like any other mode                                     | Lowest friction and fastest growth in that mode. Accepts materially higher safety and moderation exposure, and a painful retrofit if incidents force the policy later.      |
+The one decision still genuinely blocking a batch — admin analytics, #12,
+Batch 15 — is in §1.3 and will get its write-up there when Batch 15 starts.
 
 ---
 
