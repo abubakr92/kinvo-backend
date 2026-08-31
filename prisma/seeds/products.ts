@@ -116,7 +116,39 @@ export async function seedProducts(): Promise<{ products: number }> {
           note: 'Seeded price. Stripe is the authority on what is charged (spec §5.10).',
         },
       });
+      continue;
     }
+
+    if (existing.amount_minor === product.amount_minor && existing.currency === product.currency) {
+      continue;
+    }
+
+    // The declared price has changed. Close the open row and open a new one —
+    // a price change is a NEW ROW, never an edit, because the old amount has
+    // to survive for grandfathering and for reconciling what people were
+    // actually charged.
+    //
+    // Without this the seed could create a price but never correct one, so an
+    // environment seeded before a price decision kept the old amount forever
+    // and re-running the seed reported success while changing nothing. That is
+    // exactly how staging ended up quoting the six provisional SKUs.
+    const changed_at = new Date();
+
+    await prisma.$transaction([
+      prisma.priceVersion.update({
+        where: { id: existing.id },
+        data: { effective_to: changed_at },
+      }),
+      prisma.priceVersion.create({
+        data: {
+          product_id: record.id,
+          amount_minor: product.amount_minor,
+          currency: product.currency,
+          effective_from: changed_at,
+          note: 'Seeded price. Stripe is the authority on what is charged (spec §5.10).',
+        },
+      }),
+    ]);
   }
 
   return { products: PRODUCTS.length };
