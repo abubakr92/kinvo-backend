@@ -68,7 +68,7 @@ export async function setTier(userId: string, tier: SubscriptionTier): Promise<v
       user_id: userId,
       product_id: product.id,
       status: 'active',
-      source: 'stripe',
+      source: 'apple',
       original_transaction_id: `test_sub_${userId}_${tier}`,
       current_period_start: now,
       current_period_end: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),

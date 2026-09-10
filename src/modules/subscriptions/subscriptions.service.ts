@@ -1,33 +1,31 @@
 import {
   type BillingCycle,
-  PaymentSource,
+  type PaymentSource,
   SubscriptionStatus,
   SubscriptionTier,
   type Prisma,
   prisma,
 } from '@/db/prisma';
-import type { ProviderEvent } from '@/providers/payment.provider';
 import { emitEntitlementsUpdated } from '@/realtime/emit';
-import { notify } from '@modules/notifications/notifications.service';
-import { ApiError } from '@utils/api-error';
-import { ERROR_CODES } from '@utils/error-codes';
 import { logger } from '@utils/logger';
-import { getPaymentProvider } from './providers';
 
 /**
- * Subscriptions (spec §5.10, Batch 13).
+ * Subscriptions (spec §5.10).
  *
- * THE RULE, quoted from the spec because everything here follows from it:
+ * This module READS subscriptions. It cannot create or modify one, and there is
+ * deliberately no code path here that grants access — purchasing and receipt
+ * validation live outside this codebase entirely, and rows arrive from there.
+ *
+ * That division is what keeps the spec's rule enforceable:
  *
  *   "Never grant entitlement from a client claim alone. The app sends a
  *    transaction; the server verifies it with the store before anything
  *    changes. A client-trusting implementation is trivially exploitable and
  *    will be exploited."
  *
- * So there is no endpoint that takes a tier, a price, or a receipt and grants
- * access. Access changes in exactly one place — `applyProviderEvent`, which is
- * only ever reached from a signature-verified webhook or a direct read from the
- * provider's API.
+ * With no writer in this service, the only way a tier can change is a
+ * verified subscription row. An endpoint that took a tier, a price or a receipt
+ * and acted on it would be the bug.
  *
  * ENTITLEMENT BELONGS TO THE USER, not a device or a store account. The tier is
  * resolved from Subscription rows keyed on user_id, so signing in anywhere
@@ -41,7 +39,7 @@ import { getPaymentProvider } from './providers';
  * has already paid for the rest of the period. `current_period_end` is what
  * actually ends access, checked separately below.
  *
- * `in_grace_period` and `on_billing_retry` are here because the provider is
+ * `in_grace_period` and `on_billing_retry` are here because the biller is
  * still trying to collect. Cutting someone off over a card that needed
  * reissuing loses the customer AND the payment.
  */
@@ -92,9 +90,8 @@ export async function resolveTier(userId: string, now = new Date()): Promise<Sub
 /**
  * Recomputes the tier and writes the denormalised copy.
  *
- * Called after every state change. Emits over the socket so a client sitting on
- * the paywall updates the moment the payment clears, rather than on next
- * launch.
+ * Emits over the socket so a client sitting on the paywall updates the moment
+ * its entitlement changes, rather than on next launch.
  */
 async function syncTier(userId: string): Promise<SubscriptionTier> {
   const tier = await resolveTier(userId);
@@ -165,7 +162,6 @@ export interface ProductView {
   billing_cycle: BillingCycle;
   /** spec §4.6: integer minor units plus currency. Never floats. */
   price: { amount_minor: number; currency: string } | null;
-  stripe_price_id: string | null;
 }
 
 /**
@@ -174,6 +170,9 @@ export interface ProductView {
  * Prices come from the current PriceVersion rather than being hardcoded, so a
  * price change is a row with a new `effective_from` and the old one keeps its
  * history for grandfathering and reporting (spec §5.10).
+ *
+ * INFORMATIONAL. Whoever takes the payment decides what is actually charged;
+ * this is the catalogue the paywall renders, not a price the backend enforces.
  */
 export async function listProducts(): Promise<ProductView[]> {
   const now = new Date();
@@ -202,254 +201,8 @@ export async function listProducts(): Promise<ProductView[]> {
       tier: product.tier,
       billing_cycle: product.billing_cycle,
       price: price ? { amount_minor: price.amount_minor, currency: price.currency } : null,
-      stripe_price_id: product.stripe_price_id,
     };
   });
-}
-
-/**
- * Starts a purchase.
- *
- * Grants NOTHING. The response is a URL; the user is not subscribed until the
- * provider says so through a verified webhook. That separation is the whole
- * defence against a forged client claim.
- */
-export async function createCheckout(
-  userId: string,
-  productSlug: string,
-  urls: { successUrl: string; cancelUrl: string },
-): Promise<{ url: string; session_id: string }> {
-  const provider = getPaymentProvider();
-
-  if (!provider.isConfigured) {
-    throw new ApiError(ERROR_CODES.SERVICE_UNAVAILABLE, 'Payments are not available yet.');
-  }
-
-  const product = await prisma.subscriptionProduct.findFirst({
-    where: { slug: productSlug, is_active: true },
-    select: { id: true, stripe_price_id: true, tier: true },
-  });
-
-  if (!product || !product.stripe_price_id) {
-    throw ApiError.notFound('That plan is not available.');
-  }
-
-  // Reuse the provider's customer record so a returning subscriber keeps one
-  // billing history rather than accumulating a customer per purchase.
-  const existing = await prisma.subscription.findFirst({
-    where: { user_id: userId, store_purchase_token: { not: null } },
-    orderBy: { created_at: 'desc' },
-    select: { store_purchase_token: true },
-  });
-
-  const session = await provider.createCheckout({
-    userId,
-    externalPriceId: product.stripe_price_id,
-    successUrl: urls.successUrl,
-    cancelUrl: urls.cancelUrl,
-    externalCustomerId: existing?.store_purchase_token ?? null,
-  });
-
-  logger.info({ user_id: userId, product: productSlug }, 'checkout started');
-
-  return session;
-}
-
-export async function createPortalSession(
-  userId: string,
-  returnUrl: string,
-): Promise<{ url: string }> {
-  const provider = getPaymentProvider();
-
-  const subscription = await prisma.subscription.findFirst({
-    where: { user_id: userId, store_purchase_token: { not: null } },
-    orderBy: { created_at: 'desc' },
-    select: { store_purchase_token: true },
-  });
-
-  if (!subscription?.store_purchase_token) {
-    throw ApiError.notFound('There is no billing account to manage yet.');
-  }
-
-  return provider.createPortalSession({
-    externalCustomerId: subscription.store_purchase_token,
-    returnUrl,
-  });
-}
-
-/**
- * Applies a verified provider event. THE ONLY PLACE ACCESS CHANGES.
- *
- * Idempotent by the provider's event id: both Stripe and the app stores retry,
- * and duplicates are routine rather than exceptional (spec §5.10). The
- * `WebhookEvent` row is written first and its unique constraint is what makes
- * a concurrent duplicate a no-op rather than a double-apply.
- */
-export async function applyProviderEvent(event: ProviderEvent): Promise<{ applied: boolean }> {
-  const alreadySeen = await prisma.processedWebhookEvent.findUnique({
-    where: { source_event_id: { source: PaymentSource.stripe, event_id: event.event_id } },
-    select: { id: true },
-  });
-
-  if (alreadySeen) {
-    logger.debug({ event_id: event.event_id }, 'duplicate webhook ignored');
-    return { applied: false };
-  }
-
-  const existing = await prisma.subscription.findFirst({
-    where: {
-      source: PaymentSource.stripe,
-      original_transaction_id: event.external_subscription_id,
-    },
-    include: SUBSCRIPTION_INCLUDE,
-  });
-
-  // A checkout.session.completed carries the user but no period yet; the
-  // subscription.created that follows carries the period. Skipping the first is
-  // correct rather than an omission — acting on it would write a subscription
-  // with invented dates.
-  const userId = event.user_id ?? existing?.user_id ?? null;
-
-  if (!userId) {
-    logger.warn({ event_id: event.event_id }, 'webhook has no resolvable user');
-    await recordProcessed(event);
-    return { applied: false };
-  }
-
-  if (!event.current_period_end && !existing) {
-    await recordProcessed(event);
-    return { applied: false };
-  }
-
-  const product = event.external_price_id
-    ? await prisma.subscriptionProduct.findFirst({
-        where: { stripe_price_id: event.external_price_id },
-        select: { id: true },
-      })
-    : null;
-
-  const productId = product?.id ?? existing?.product_id;
-
-  if (!productId) {
-    // An event for a price nobody seeded. Recorded so it is not retried
-    // forever, and logged loudly because it means the catalogue is out of step
-    // with the provider.
-    logger.error(
-      { event_id: event.event_id, price: event.external_price_id },
-      'webhook references an unknown price',
-    );
-    await recordProcessed(event);
-    return { applied: false };
-  }
-
-  const revoked = event.status === SubscriptionStatus.refunded;
-
-  await prisma.$transaction(async (tx) => {
-    if (existing) {
-      await tx.subscription.update({
-        where: { id: existing.id },
-        data: {
-          product_id: productId,
-          status: event.status,
-          auto_renew: event.auto_renew,
-          ...(event.current_period_start
-            ? { current_period_start: event.current_period_start }
-            : {}),
-          ...(event.current_period_end ? { current_period_end: event.current_period_end } : {}),
-          ...(event.status === SubscriptionStatus.cancelled ? { cancelled_at: new Date() } : {}),
-          ...(event.status === SubscriptionStatus.expired ? { expired_at: new Date() } : {}),
-          // spec §5.10: a refunded user keeping premium is a revenue leak.
-          // Ending the period NOW is what actually removes access, because
-          // resolveTier checks the period rather than the label.
-          ...(revoked
-            ? {
-                refunded_at: event.revoked_at ?? new Date(),
-                revoked_at: event.revoked_at ?? new Date(),
-                current_period_end: event.revoked_at ?? new Date(),
-              }
-            : {}),
-        },
-      });
-    } else {
-      await tx.subscription.create({
-        data: {
-          user_id: userId,
-          product_id: productId,
-          status: event.status,
-          source: PaymentSource.stripe,
-          original_transaction_id: event.external_subscription_id,
-          store_transaction_id: event.external_subscription_id,
-          current_period_start: event.current_period_start ?? new Date(),
-          current_period_end: event.current_period_end ?? new Date(),
-          auto_renew: event.auto_renew,
-        },
-      });
-    }
-
-    await tx.processedWebhookEvent.create({
-      data: {
-        source: PaymentSource.stripe,
-        event_id: event.event_id,
-        event_type: event.type,
-      },
-    });
-  });
-
-  const tier = await syncTier(userId);
-
-  await announce(userId, event, tier);
-
-  logger.info({ event_id: event.event_id, type: event.type, tier }, 'subscription event applied');
-
-  return { applied: true };
-}
-
-async function recordProcessed(event: ProviderEvent): Promise<void> {
-  await prisma.processedWebhookEvent.create({
-    data: {
-      source: PaymentSource.stripe,
-      event_id: event.event_id,
-      event_type: event.type,
-    },
-  });
-}
-
-async function announce(
-  userId: string,
-  event: ProviderEvent,
-  tier: SubscriptionTier,
-): Promise<void> {
-  if (event.status === SubscriptionStatus.refunded) {
-    await notify({
-      userId,
-      category: 'subscription',
-      title: 'Subscription refunded',
-      body: 'Your premium features have ended.',
-      data: { tier },
-    });
-    return;
-  }
-
-  if (event.type === 'customer.subscription.created' && tier !== SubscriptionTier.free) {
-    await notify({
-      userId,
-      category: 'subscription',
-      title: 'Welcome to Kinvo Premium',
-      body: 'Your new features are ready.',
-      data: { tier },
-    });
-    return;
-  }
-
-  if (event.status === SubscriptionStatus.on_billing_retry) {
-    await notify({
-      userId,
-      category: 'subscription',
-      title: 'Payment problem',
-      body: 'We could not take your payment. Update your card to keep your features.',
-      data: { tier },
-    });
-  }
 }
 
 /** The user's own subscription state. */
@@ -468,56 +221,6 @@ export async function getMySubscription(userId: string): Promise<{
     // spec §4.6: null, never an omitted key.
     subscription: subscription ? toView(subscription) : null,
   };
-}
-
-/**
- * Re-reads state from the provider (spec §5.10: restore purchases).
- *
- * Reads from the PROVIDER, never from anything the client sent — that is what
- * makes it a restore rather than a way to claim a subscription.
- *
- * Entitlement belongs to the user, so a subscription bought on one device
- * resolves on any other simply by being keyed on user_id.
- */
-export async function restorePurchases(userId: string): Promise<{
-  restored: number;
-  tier: SubscriptionTier;
-}> {
-  const provider = getPaymentProvider();
-
-  if (!provider.isConfigured || !('fetchSubscription' in provider)) {
-    return { restored: 0, tier: await resolveTier(userId) };
-  }
-
-  const known = await prisma.subscription.findMany({
-    where: { user_id: userId, source: PaymentSource.stripe },
-    select: { original_transaction_id: true },
-  });
-
-  const stripe = provider as unknown as {
-    fetchSubscription(id: string): Promise<ProviderEvent | null>;
-  };
-
-  let restored = 0;
-
-  for (const row of known) {
-    if (!row.original_transaction_id) {
-      continue;
-    }
-
-    const event = await stripe.fetchSubscription(row.original_transaction_id);
-
-    if (event) {
-      // A fresh event id each time, so a restore is never mistaken for a
-      // duplicate webhook and skipped.
-      const result = await applyProviderEvent({ ...event, user_id: userId });
-      if (result.applied) {
-        restored += 1;
-      }
-    }
-  }
-
-  return { restored, tier: await syncTier(userId) };
 }
 
 /**

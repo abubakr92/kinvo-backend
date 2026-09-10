@@ -44,7 +44,7 @@ The eight modes: `dating`, `study_buddy`, `networking`, `trading`, `foodie`, `cu
 | Push       | Firebase Cloud Messaging                                                                                         |
 | SMS / OTP  | Twilio Verify                                                                                                    |
 | Video      | Twilio Video, behind a `VideoProvider` interface                                                                 |
-| Payments   | **Stripe only** (decision #13). Behind a `PaymentProvider` interface, so a store or RevenueCat is a new class      |
+| Payments   | **None in this codebase.** No processor, no checkout, no webhook — see the Subscriptions section below            |
 | Jobs       | BullMQ + Redis                                                                                                   |
 | Logging    | Pino                                                                                                             |
 | Testing    | Jest + Supertest against a real Postgres                                                                         |
@@ -160,14 +160,23 @@ Never widen `req.user` from a token claim. `authenticate` loads the user on ever
 
 **Subscriptions (spec §5.10).** Never grant entitlement from a client claim.
 
-- Checkout accepts a product **slug** and nothing else — no tier, no price, no receipt. The schema is `.strict()`, so a client sending `tier: advanced` gets a 400 rather than being quietly ignored.
-- Access changes in exactly one function, `applyProviderEvent`, reachable only from a signature-verified webhook. If a second path to granting access appears, that is the bug.
-- The webhook route is **excluded from `express.json()`** in `app.ts`. Stripe signs the raw bytes; parsing and re-serialising changes them, and every signature fails in a way that reads like a wrong webhook secret.
-- Processing is idempotent by provider event id (`ProcessedWebhookEvent`). Providers retry; duplicates are routine, and the unique constraint is what makes a concurrent duplicate a no-op instead of a double-apply.
-- `cancelled`, `in_grace_period` and `on_billing_retry` **keep** access — the period is paid for, and a card that needs reissuing must not cost the customer both the money and the feature. Refunds and disputes revoke **immediately**.
-- Access ends on `current_period_end`, checked at read time. The nightly sweep is bookkeeping, so a late or failed sweep can never hand out free premium.
-- Entitlement resolves from **Subscription rows**, never `user.subscription_tier` — that column is a denormalised copy for admin lists. A column somebody can edit is not an entitlement.
+Payment processing is **not in this codebase**. There is no processor, no checkout,
+no billing portal, no webhook and no receipt validation. Purchasing happens in the
+mobile app; subscription rows arrive from outside.
 
+That is what makes §5.10 enforceable here rather than merely intended:
+
+- **No HTTP route can grant access.** `/subscriptions` exposes two READS — `/products` and `/me`. A test asserts that `/checkout`, `/portal`, `/restore` and the whole `/webhooks` namespace return **404**. If any of them ever answers something else, a path to granting entitlement has reappeared, and that is the bug.
+- **Entitlement resolves from Subscription rows**, never `user.subscription_tier`. That column is a denormalised copy for admin lists; a column somebody can edit is not an entitlement, and a test asserts that writing it grants nothing.
+- `resolveTier` takes the **highest** entitling tier, because a mid-period upgrade leaves two rows briefly and the answer must be the better one rather than whichever row came back first.
+- `cancelled`, `in_grace_period` and `on_billing_retry` **keep** access — the period is paid for, and a card that needs reissuing must not cost the customer both the money and the feature. A row with `refunded_at` or `revoked_at` set loses access **immediately**.
+- Access ends on `current_period_end`, checked at **read time**. The nightly sweep only updates the status column for admin lists, so a late or failed sweep can never hand out free premium.
+- Product prices are the **catalogue the paywall renders**, and are informational. Whoever takes the payment decides what is actually charged. A price change is a new `PriceVersion` row, never an edit, so the old amount survives for grandfathering and for reconciling what people were really charged.
+
+If payment handling ever comes back into this codebase, the rule it must satisfy is
+unchanged: access changes in exactly one place, reachable only from something whose
+authenticity was verified server-side. Not from a request body, and not from what a
+client SDK reports about itself.
 **Money.** Integer minor units plus a currency code. Never a float, never a formatted string.
 **Blocks (spec 5.5).** Blocks beat everything. The shared exclusion clause lives in `src/modules/safety/block.service.ts` and **must never be re-implemented**:
 
@@ -281,17 +290,19 @@ When blocked, ask. Do not invent a business rule and bury it in code.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Database:** PostgreSQL + PostGIS. S3 for media bytes only — never application records.                                                                  |
 | 4   | **Trading mode:** interest category only, no trading functionality.                                                                                       |
-| 13  | **Payment rails: Stripe only.** Apple IAP and Google Play Billing are out of scope — both stores belong to the mobile team. The `PaymentProvider` interface exists anyway, so adding a store later is a new class and nothing else. |
-| 2,3 | **Four SKUs:** Basic and Premium × monthly and yearly. Annual is a third off. No quarterly (sells to nobody), no weekly (a churn machine), no free trial in v1. Tier matrix unchanged from the Batch 6 provisional. |
+| 13  | **Payments are not this codebase's job.** No processor, no checkout, no webhook, no receipt validation. RevenueCat is handled in the mobile app. This backend READS subscription rows to resolve entitlement and serve the paywall catalogue, and has no way to create one. |
+| 2,3 | **Four SKUs:** Basic and Premium × monthly and yearly. Annual is a third off. No quarterly (sells to nobody), no weekly (a churn machine), no free trial in v1. Tier matrix unchanged from the Batch 6 provisional. Prices here are the paywall CATALOGUE and are informational — the backend cannot change what anyone is charged. |
 | 5   | **"Requests" tab:** a **likes-you inbox** — profiles, not messages. Users cannot message before matching, so a conversation always has a match behind it. |
 | 11  | **Study Buddy groups:** one-to-one only in v1. Every conversation has exactly two participants.                                                           |
 | —   | **Runtime:** Node 24 instead of the spec's EOL Node 20.                                                                                                   |
 
 ## Still open — ask before the batch that needs them
 
+Nothing currently blocks a batch.
+
 | #   | Question                                | Blocks | Status |
 | --- | --------------------------------------- | ------ | ------ |
-| 12  | Admin analytics — which metrics?        | 15     | The only decision still blocking a batch. |
+| 12  | Admin analytics — which metrics?        | —      | **Moot here.** Admin moves to its own repository (DECISIONS.md §1.2o), so this follows it. |
 | —   | Cloudflare R2 instead of S3 for media   | —      | Not blocking. Same SDK, different endpoint; the argument is egress cost at real traffic. |
 
 **Shipped on engineering placeholders, not PO decisions** (DECISIONS.md §1.2e).

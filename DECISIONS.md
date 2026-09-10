@@ -199,6 +199,52 @@ listed with what it costs to change later.
 | **Webhook idempotency by provider event id, in its own table.** | 2026-08-28 | Eng | Both Stripe and the stores retry; duplicates are routine. The unique constraint is what makes a concurrent duplicate a no-op rather than a double-apply. |
 | **`express.json()` skips `/webhooks/*`.** | 2026-08-28 | Eng | Caught before shipping. The global parser ran before the router, so the webhook would have received a parsed object instead of raw bytes and EVERY Stripe signature would have failed — presenting as a wrong webhook secret rather than a middleware ordering bug. |
 
+### 1.2o Payments leave the backend — 2026-09-10
+
+| Decision | By | Detail |
+| --- | --- | --- |
+| **All Stripe work is removed.** | PO | RevenueCat is being handled in the mobile app. The backend keeps no processor, no checkout, no billing portal, no webhook and no receipt validation. |
+| **Batch 15 admin is out of this codebase.** | PO | The PO has an existing admin panel frontend, which will live in its own repository. Batch 15 proceeds with everything else: the security pass, the generated contract, the deck load test and the deployment README. |
+
+**What the removal actually touched.** The Stripe adapter, the `PaymentProvider`
+interface (its only implementation was Stripe), the provider factory, the checkout
+and portal schemas, `applyProviderEvent`, `ProcessedWebhookEvent`, the webhook
+router, the raw-body carve-out in `app.ts`, `stripe_price_id`, the `stripe` member
+of `PaymentSource`, the four `STRIPE_*` environment variables, the `stripe`
+package, and the OpenAPI entries. Roughly 700 lines.
+
+**What deliberately stayed.** The subscription data model — `Subscription`,
+`SubscriptionProduct`, `PriceVersion` — plus `resolveTier`, the expiry sweep, and
+the two read endpoints. Entitlement resolves from Subscription rows, so removing
+these would have broken Batches 6, 7 and 8. The PO asked for Stripe gone and
+nothing else touched, and this is where that line falls.
+
+**The §5.10 guarantee got STRONGER, not weaker.** With no writer and no webhook,
+there is no code path from a request to a subscription row at all. A test asserts
+that `/checkout`, `/portal`, `/restore` and the entire `/webhooks` namespace answer 404,
+and that writing `user.subscription_tier` by hand grants nothing. Those two
+assertions are the whole contract now.
+
+**One thing the PO should know.** RevenueCat reports entitlement to the app through
+its SDK. Nothing may grant access on the strength of that report — an app claiming
+"I am premium" is exactly the client claim §5.10 forbids. Whatever eventually
+writes Subscription rows has to verify server-side, whether that is this backend
+receiving RevenueCat webhooks later or something else doing it. Flagged, not
+blocking.
+
+**Migration history was BASELINED rather than extended.** A forward `remove_stripe`
+migration would have left the word in the SQL trail, which is the opposite of what
+was asked. Instead the `init` migration no longer declares the removed column or
+enum value, the hand-written webhook migration is gone, and the recorded checksum
+was corrected on every database. `prisma migrate status` reports 5 migrations and
+no drift. No environment was reset and no data was lost — checked first that no row
+anywhere carried the enum value being dropped, or the type recreation would have
+failed.
+
+**What still records that Stripe existed:** this log, and git history. The client
+mirror is a single fresh commit, so the repository a contractor sees carries
+neither.
+
 ### 1.3 Still open
 
 **Carried from Batch 13:**
@@ -210,7 +256,7 @@ listed with what it costs to change later.
 
 | #   | Question | Blocks batch | Status |
 | --- | --- | --- | --- |
-| 12  | Admin analytics — which metrics exactly? | 15 | **Genuinely open.** The only decision still blocking a batch. |
+| 12  | Admin analytics — which metrics exactly? | — | **Moot here.** Admin moves to its own repository (§1.2o), so this decision follows it. |
 | —   | **Cloudflare R2 instead of S3** for media bytes? | — | **Open, not blocking.** Identical API, no egress charges; for a photo-heavy app egress is the fastest-growing line on the bill. Same SDK code, different endpoint — so it stays cheap to switch right up until there is real traffic. |
 | —   | **Profile photo URLs:** CDN signed URLs vs expiring S3 presigned GETs. | — | **Shipped as presigned GETs.** Works, but each URL is unique per request, so Flutter re-downloads every photo on every render. Revisit when the app is being tuned, not before. |
 
@@ -554,9 +600,9 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 10    | Moderation                  | ✅     | Moderation provider account                                  | **#8**                         |
 | 11    | Notifications               | ✅     | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ✅     | S3 (report evidence)                                         | Block visibility               |
-| 13    | Subscriptions (Stripe only) | ✅     | Stripe account                                               | **#2, #3**                     |
+| 13    | Subscriptions (read-only)   | ✅     | None — payments are outside this codebase                    | —                              |
 | 14    | Video calling               | ⬜     | Twilio SDK already installed; credentials come later         | —                              |
-| 15    | Admin, docs, hardening      | ⬜     | —                                                            | **#12 — admin metrics**        |
+| 15    | Docs, hardening, load test  | ⬜     | —                                                            | — (admin is a separate repo)   |
 
 ### 3.1 Tooling timeline
 

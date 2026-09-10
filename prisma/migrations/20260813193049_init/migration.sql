@@ -63,7 +63,7 @@ CREATE TYPE "billing_cycle" AS ENUM ('monthly', 'quarterly', 'yearly');
 CREATE TYPE "subscription_status" AS ENUM ('active', 'in_grace_period', 'on_billing_retry', 'expired', 'cancelled', 'refunded', 'revoked');
 
 -- CreateEnum
-CREATE TYPE "payment_source" AS ENUM ('apple', 'google', 'stripe');
+CREATE TYPE "payment_source" AS ENUM ('apple', 'google');
 
 -- CreateEnum
 CREATE TYPE "media_kind" AS ENUM ('chat_image', 'chat_video', 'voice_note', 'verification_document', 'report_evidence');
@@ -628,7 +628,6 @@ CREATE TABLE "subscription_products" (
     "billing_cycle" "billing_cycle" NOT NULL,
     "apple_product_id" VARCHAR(128),
     "google_product_id" VARCHAR(128),
-    "stripe_price_id" VARCHAR(128),
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "sort_order" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1058,9 +1057,6 @@ CREATE UNIQUE INDEX "subscription_products_apple_product_id_key" ON "subscriptio
 
 -- CreateIndex
 CREATE UNIQUE INDEX "subscription_products_google_product_id_key" ON "subscription_products"("google_product_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "subscription_products_stripe_price_id_key" ON "subscription_products"("stripe_price_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "subscription_products_tier_billing_cycle_key" ON "subscription_products"("tier", "billing_cycle");

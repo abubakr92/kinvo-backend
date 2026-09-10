@@ -216,7 +216,6 @@ enum SubscriptionStatus {
 enum PaymentSource {
   apple
   google
-  stripe
 
   @@map("payment_source")
 }
@@ -426,34 +425,34 @@ model User {
   password_reset_tokens  PasswordResetToken[]
   devices                Device[]
   media_assets           MediaAsset[]
-  verifications          Verification[]         @relation("VerificationSubject")
-  verifications_reviewed Verification[]         @relation("VerificationReviewer")
+  verifications          Verification[]           @relation("VerificationSubject")
+  verifications_reviewed Verification[]           @relation("VerificationReviewer")
   user_modes             UserMode[]
-  swipes_made            Swipe[]                @relation("SwipeActor")
-  swipes_received        Swipe[]                @relation("SwipeTarget")
-  matches_as_a           Match[]                @relation("MatchUserA")
-  matches_as_b           Match[]                @relation("MatchUserB")
+  swipes_made            Swipe[]                  @relation("SwipeActor")
+  swipes_received        Swipe[]                  @relation("SwipeTarget")
+  matches_as_a           Match[]                  @relation("MatchUserA")
+  matches_as_b           Match[]                  @relation("MatchUserB")
   decks                  Deck[]
-  deck_entries           DeckEntry[]            @relation("DeckEntryTarget")
+  deck_entries           DeckEntry[]              @relation("DeckEntryTarget")
   boosts                 Boost[]
   conversation_states    ConversationState[]
   messages               Message[]
-  blocks_made            Block[]                @relation("Blocker")
-  blocks_received        Block[]                @relation("Blocked")
-  reports_made           Report[]               @relation("Reporter")
-  reports_received       Report[]               @relation("Reported")
-  reports_reviewed       Report[]               @relation("ReportReviewer")
+  blocks_made            Block[]                  @relation("Blocker")
+  blocks_received        Block[]                  @relation("Blocked")
+  reports_made           Report[]                 @relation("Reporter")
+  reports_received       Report[]                 @relation("Reported")
+  reports_reviewed       Report[]                 @relation("ReportReviewer")
   trusted_contacts       TrustedContact[]
   live_locations         LiveLocationSession[]
   emergency_events       EmergencyEvent[]
-  plans_created          Plan[]                 @relation("PlanCreator")
+  plans_created          Plan[]                   @relation("PlanCreator")
   availability_windows   AvailabilityWindow[]
   saved_venues           SavedVenue[]
   subscriptions          Subscription[]
   idempotency_keys       IdempotencyKey[]
   notifications          Notification[]
   notification_prefs     NotificationPreference[]
-  calls_initiated        CallSession[]          @relation("CallInitiator")
+  calls_initiated        CallSession[]            @relation("CallInitiator")
   call_safety_actions    CallSafetyAction[]
   moderation_checks      ModerationCheck[]
   admin_audit_logs       AdminAuditLog[]
@@ -498,11 +497,11 @@ model RefreshToken {
   token_hash String  @unique
   device_id  String? @db.VarChar(128)
 
-  expires_at DateTime
-  revoked_at DateTime?
+  expires_at     DateTime
+  revoked_at     DateTime?
   /// Set when this token is rotated. Presenting a token that has this populated
   /// is theft — revoke the whole family.
-  replaced_by_id String? @db.Uuid
+  replaced_by_id String?   @db.Uuid
 
   created_at DateTime @default(now())
 
@@ -577,9 +576,9 @@ model Profile {
   /// see src/db/geo.ts. The GIST index is created in the migration by hand.
   /// Nullable: a user has no location until they grant permission.
   location            Unsupported("geography(Point, 4326)")?
-  city                String?                               @db.VarChar(120)
+  city                String?                                @db.VarChar(120)
   /// ISO 3166-1 alpha-2.
-  country             String?                               @db.Char(2)
+  country             String?                                @db.Char(2)
   location_updated_at DateTime?
 
   drinking Frequency?
@@ -741,10 +740,10 @@ model MediaAsset {
   created_at DateTime  @default(now())
   deleted_at DateTime?
 
-  owner            User             @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  messages         Message[]
-  verifications    Verification[]
-  report_evidence  ReportEvidence[]
+  owner           User             @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  messages        Message[]
+  verifications   Verification[]
+  report_evidence ReportEvidence[]
 
   @@index([owner_id])
   @@index([kind])
@@ -757,10 +756,10 @@ model Verification {
   id      String @id @default(uuid(4)) @db.Uuid
   user_id String @db.Uuid
 
-  method VerificationMethod
-  status VerificationStatus @default(pending)
+  method       VerificationMethod
+  status       VerificationStatus @default(pending)
   /// Three-step wizard position, 1..3.
-  current_step Int @default(1)
+  current_step Int                @default(1)
 
   asset_id        String? @db.Uuid
   social_provider String? @db.VarChar(32)
@@ -832,11 +831,11 @@ model UserSettings {
   user_id String @unique @db.Uuid
 
   // --- Appearance --------------------------------------------------------
-  theme            ThemePreference @default(system)
+  theme         ThemePreference @default(system)
   /// 1.0 is the system default. Bounded by a CHECK in the migration.
-  text_scale       Float           @default(1.0)
-  reduce_motion    Boolean         @default(false)
-  high_contrast    Boolean         @default(false)
+  text_scale    Float           @default(1.0)
+  reduce_motion Boolean         @default(false)
+  high_contrast Boolean         @default(false)
 
   // --- Privacy -----------------------------------------------------------
   /// spec §4.6 keeps the API in metres regardless; this is display only.
@@ -907,10 +906,10 @@ model Match {
   user_b_id String @db.Uuid
   mode      Mode
 
-  status MatchStatus @default(active)
+  status        MatchStatus @default(active)
   /// spec §5.3: a super_like counts as a like for matching and is surfaced to
   /// the recipient.
-  is_super_like Boolean @default(false)
+  is_super_like Boolean     @default(false)
 
   matched_at DateTime @default(now())
   /// spec §5.4: stored explicitly rather than computed. "Extend matches" is a
@@ -921,10 +920,10 @@ model Match {
   extended_at     DateTime?
   extension_count Int       @default(0)
 
-  unmatched_at DateTime?
+  unmatched_at    DateTime?
   /// Not a foreign key: this always references user_a or user_b, both of which
   /// are already FK-enforced on this row.
-  unmatched_by_id String? @db.Uuid
+  unmatched_by_id String?   @db.Uuid
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -1211,7 +1210,7 @@ model LiveLocationPing {
   /// PostGIS. Written through raw SQL only.
   location        Unsupported("geography(Point, 4326)")?
   accuracy_metres Int?
-  recorded_at     DateTime                              @default(now())
+  recorded_at     DateTime                               @default(now())
 
   session LiveLocationSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
 
@@ -1225,7 +1224,7 @@ model EmergencyEvent {
   type    EmergencyEventType
 
   location    Unsupported("geography(Point, 4326)")?
-  note        String?                               @db.VarChar(500)
+  note        String?                                @db.VarChar(500)
   resolved_at DateTime?
 
   created_at DateTime @default(now())
@@ -1248,7 +1247,7 @@ model Plan {
   creator_id String @db.Uuid
   match_id   String @db.Uuid
 
-  venue_id       String? @db.Uuid
+  venue_id        String? @db.Uuid
   custom_location String? @db.VarChar(200)
   custom_address  String? @db.VarChar(300)
 
@@ -1281,10 +1280,10 @@ model Plan {
 }
 
 model PlanShare {
-  id                String   @id @default(uuid(4)) @db.Uuid
-  plan_id           String   @db.Uuid
-  trusted_contact_id String  @db.Uuid
-  shared_at         DateTime @default(now())
+  id                 String   @id @default(uuid(4)) @db.Uuid
+  plan_id            String   @db.Uuid
+  trusted_contact_id String   @db.Uuid
+  shared_at          DateTime @default(now())
 
   plan            Plan           @relation(fields: [plan_id], references: [id], onDelete: Cascade)
   trusted_contact TrustedContact @relation(fields: [trusted_contact_id], references: [id], onDelete: Cascade)
@@ -1316,16 +1315,16 @@ model AvailabilityWindow {
 /// spec §5.9: admin-curated, searchable, sorted by distance, filterable by
 /// category. Suggestions are tuned to the match's shared mode.
 model Venue {
-  id       String        @id @default(uuid(4)) @db.Uuid
-  name     String        @db.VarChar(150)
-  category VenueCategory
-  description String?    @db.VarChar(1000)
+  id          String        @id @default(uuid(4)) @db.Uuid
+  name        String        @db.VarChar(150)
+  category    VenueCategory
+  description String?       @db.VarChar(1000)
 
   /// PostGIS. Written through raw SQL only; GIST index added in the migration.
   location Unsupported("geography(Point, 4326)")?
-  address  String?                               @db.VarChar(300)
-  city     String?                               @db.VarChar(120)
-  country  String?                               @db.Char(2)
+  address  String?                                @db.VarChar(300)
+  city     String?                                @db.VarChar(120)
+  country  String?                                @db.Char(2)
 
   rating      Float?
   /// 1..4, the usual $-$$$$ scale.
@@ -1370,7 +1369,9 @@ model SavedVenue {
 // ============================================================================
 
 /// Deliberately named SubscriptionProduct to avoid collision with date-Plans.
-/// One logical product, three store SKUs (spec §5.10).
+/// The catalogue the paywall renders (spec §5.10). Store identifiers are here
+/// so a purchase reported by a store can be matched back to a product; the
+/// backend never charges anyone itself.
 model SubscriptionProduct {
   id   String @id @default(uuid(4)) @db.Uuid
   slug String @unique @db.VarChar(64)
@@ -1381,7 +1382,6 @@ model SubscriptionProduct {
 
   apple_product_id  String? @unique @db.VarChar(128)
   google_product_id String? @unique @db.VarChar(128)
-  stripe_price_id   String? @unique @db.VarChar(128)
 
   is_active  Boolean @default(true)
   sort_order Int     @default(0)
@@ -1407,7 +1407,7 @@ model Subscription {
   status SubscriptionStatus
   source PaymentSource
 
-  store_transaction_id String? @db.VarChar(256)
+  store_transaction_id    String? @db.VarChar(256)
   /// Stable across renewals — the key both stores use to identify a
   /// subscription's whole life.
   original_transaction_id String? @db.VarChar(256)
@@ -1546,8 +1546,8 @@ model IdempotencyKey {
 /// Every notification is persisted here AND pushed. The Notifications screen
 /// reads this feed, so a push-only notification silently disappears.
 model Notification {
-  id      String               @id @default(uuid(4)) @db.Uuid
-  user_id String               @db.Uuid
+  id       String               @id @default(uuid(4)) @db.Uuid
+  user_id  String               @db.Uuid
   category NotificationCategory
 
   title String @db.VarChar(150)
@@ -1606,9 +1606,9 @@ model CallSession {
 
   created_at DateTime @default(now())
 
-  match           Match              @relation(fields: [match_id], references: [id], onDelete: Cascade)
-  initiator       User               @relation("CallInitiator", fields: [initiator_id], references: [id], onDelete: Cascade)
-  safety_actions  CallSafetyAction[]
+  match          Match              @relation(fields: [match_id], references: [id], onDelete: Cascade)
+  initiator      User               @relation("CallInitiator", fields: [initiator_id], references: [id], onDelete: Cascade)
+  safety_actions CallSafetyAction[]
 
   @@index([match_id])
   @@index([initiator_id])
@@ -1649,8 +1649,8 @@ model ModerationCheck {
   content_hash String @db.VarChar(64)
   provider     String @db.VarChar(64)
 
-  severity   ModerationSeverity @default(none)
-  categories Json               @default("[]")
+  severity     ModerationSeverity @default(none)
+  categories   Json               @default("[]")
   raw_response Json?
 
   /// spec §5.4: a user pushing past a scam warning is exactly what the
@@ -1670,9 +1670,9 @@ model ModerationCheck {
 /// The moderation team's work queue. Distinct from Report: reports come from
 /// users, flags come from the system.
 model ModerationFlag {
-  id           String  @id @default(uuid(4)) @db.Uuid
-  subject_type String  @db.VarChar(32)
-  subject_id   String  @db.Uuid
+  id           String @id @default(uuid(4)) @db.Uuid
+  subject_type String @db.VarChar(32)
+  subject_id   String @db.Uuid
 
   reason   String             @db.VarChar(200)
   severity ModerationSeverity @default(low)
@@ -1689,27 +1689,6 @@ model ModerationFlag {
   @@index([status, severity])
   @@index([subject_type, subject_id])
   @@map("moderation_flags")
-}
-
-/// Every provider webhook already applied, by the provider's own event id.
-///
-/// spec §5.10: "Handle every notification idempotently — both stores retry, and
-/// duplicates are normal." Stripe is no different. The unique constraint is
-/// what makes a concurrent duplicate a no-op rather than a double-apply, which
-/// on a refund event would be the difference between removing access once and
-/// removing it twice while a renewal lands in between.
-model ProcessedWebhookEvent {
-  id String @id @default(uuid(4)) @db.Uuid
-
-  source     PaymentSource
-  event_id   String        @db.VarChar(255)
-  event_type String        @db.VarChar(100)
-
-  created_at DateTime @default(now())
-
-  @@unique([source, event_id])
-  @@index([created_at])
-  @@map("processed_webhook_events")
 }
 
 // ============================================================================

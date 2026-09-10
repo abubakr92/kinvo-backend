@@ -1,24 +1,23 @@
 import { BillingCycle, SubscriptionTier, prisma } from '@/db/prisma';
 
 /**
- * Subscription products (spec §5.10) — one logical product, three store SKUs.
+ * Subscription products (spec §5.10) — the catalogue the paywall renders.
  *
  * FOUR products: two tiers, monthly and yearly. Decided by the product owner
- * on 2026-08-28 (DECISIONS.md §1.2o), replacing the six provisional SKUs.
+ * on 2026-08-28 (DECISIONS.md §1.2n), replacing the six provisional SKUs.
  *
  * Quarterly was dropped because it sells to nobody: someone weighing a
  * commitment picks monthly, and someone convinced picks yearly for the
  * discount. Weekly was never added — it is a churn machine.
  *
- * Apple and Google identifiers are NULL. Both stores are out of scope; the
- * mobile team owns them (§1.2j, §1.2l). The columns stay so a store can be
- * added later without a migration.
+ * Store identifiers are NULL. Purchasing happens outside this codebase, so the
+ * backend has nothing to fill them with yet; the columns stay so a purchase
+ * reported later can be matched back to a product without a migration.
  *
  * PriceVersion rows are effective-dated so a price change is a new row and the
- * old one survives for grandfathering and reporting. With Stripe these are
- * NOT merely informational — unlike IAP, we set the price, so the amount here
- * is expected to match the Stripe price it points at. Stripe remains the
- * authority on what is actually charged.
+ * old one survives for grandfathering and reporting. They are INFORMATIONAL:
+ * whoever takes the payment decides what is actually charged, and the backend
+ * cannot change it. Recording history is all this can honestly claim to do.
  */
 
 interface ProductSeed {
@@ -90,9 +89,6 @@ export async function seedProducts(): Promise<{ products: number }> {
         // real identifier is how a lookup silently matches the wrong product.
         apple_product_id: null,
         google_product_id: null,
-        // Set from the real Stripe dashboard price id once the account exists.
-        // Until then checkout answers 404 for the plan, which is honest.
-        stripe_price_id: null,
         sort_order: index,
       },
       // is_active is set here too, not just on create. The updateMany above
@@ -113,7 +109,7 @@ export async function seedProducts(): Promise<{ products: number }> {
           amount_minor: product.amount_minor,
           currency: product.currency,
           effective_from: new Date('2026-01-01T00:00:00Z'),
-          note: 'Seeded price. Stripe is the authority on what is charged (spec §5.10).',
+          note: 'Seeded price. Informational only — the payment processor decides what is actually charged (spec §5.10).',
         },
       });
       continue;
@@ -145,7 +141,7 @@ export async function seedProducts(): Promise<{ products: number }> {
           amount_minor: product.amount_minor,
           currency: product.currency,
           effective_from: changed_at,
-          note: 'Seeded price. Stripe is the authority on what is charged (spec §5.10).',
+          note: 'Seeded price. Informational only — the payment processor decides what is actually charged (spec §5.10).',
         },
       }),
     ]);

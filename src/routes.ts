@@ -13,10 +13,7 @@ import { mediaRouter, verificationRouter } from '@modules/media/media.routes';
 import { moderationRouter } from '@modules/moderation/moderation.routes';
 import { notificationsRouter } from '@modules/notifications/notifications.routes';
 import { plansRouter } from '@modules/plans/plans.routes';
-import {
-  subscriptionsRouter,
-  subscriptionsWebhookRouter,
-} from '@modules/subscriptions/subscriptions.routes';
+import { subscriptionsRouter } from '@modules/subscriptions/subscriptions.routes';
 import { blocksRouter, reportsRouter, safetyRouter } from '@modules/safety/safety.routes';
 import { venuesRouter } from '@modules/venues/venues.routes';
 import { modesRouter } from '@modules/modes/modes.routes';
@@ -54,10 +51,5 @@ apiRouter.use('/safety', safetyRouter);
 apiRouter.use('/plans', plansRouter);
 apiRouter.use('/venues', venuesRouter);
 apiRouter.use('/subscriptions', subscriptionsRouter);
-
-// Webhooks are mounted apart from everything else on purpose. They need the
-// RAW body for signature verification, and they carry no bearer token — the
-// signature IS the authentication.
-apiRouter.use('/webhooks', subscriptionsWebhookRouter);
 apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/devices', devicesRouter);
