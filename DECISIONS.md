@@ -555,8 +555,8 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 11    | Notifications               | ✅     | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ✅     | S3 (report evidence)                                         | Block visibility               |
 | 13    | Subscriptions (Stripe only) | ✅     | Stripe account                                               | **#2, #3**                     |
-| 14    | Video calling               | ⬜     | **Twilio Video credentials**                                 | —                              |
-| 15    | Admin, docs, hardening      | ⬜     | —                                                            | **#12**                        |
+| 14    | Video calling               | ⬜     | Twilio SDK already installed; credentials come later         | —                              |
+| 15    | Admin, docs, hardening      | ⬜     | —                                                            | **#12 — admin metrics**        |
 
 ### 3.1 Tooling timeline
 
@@ -567,23 +567,24 @@ Install nothing before it is needed. Unused tools rot.
 | Node.js 24, npm | Batch 0              | ✅ v24.18.0 / npm 11.16.0 |
 | Git             | Batch 1              | ✅ installed              |
 | Docker Desktop  | Batch 1              | ✅ v29.7.2, verified      |
-| AWS CLI         | Deployment interlude | ⬜ not installed          |
-| Terraform       | Deployment interlude | ⬜ not installed          |
+| AWS CLI         | Deployment interlude | ✅ installed and in use   |
+| Terraform       | Deployment interlude | ✅ installed, state in S3 |
 
 ### 3.2 External accounts the PO must provide
 
-Each one gates the batch beside it. Lead time matters — Apple Developer enrolment in particular is not same-day.
+Each one gates the batch beside it.
 
-| Account                             | Needed for   | Status         |
-| ----------------------------------- | ------------ | -------------- |
-| AWS IAM user (not root) + MFA       | Interlude    | PO in progress |
-| Domain name                         | Interlude    | ⬜             |
-| Twilio (Verify)                     | Batch 2 live | ⬜             |
-| Firebase (Cloud Messaging)          | Batch 11     | ⬜             |
-| SMTP provider                       | Batch 11     | ⬜             |
-| Apple Developer / App Store Connect | Batch 13     | ⬜             |
-| Google Play Console                 | Batch 13     | ⬜             |
-| Twilio Video                        | Batch 14     | ⬜             |
+| Account                             | Needed for   | Status |
+| ----------------------------------- | ------------ | ------ |
+| AWS IAM user (not root) + MFA       | Interlude    | ✅ `user/Insync`. Root credentials are never used. |
+| Domain name                         | Launch       | ⬜ Not a development blocker (§1.2l). Gates SES production access, DKIM/SPF, branded URLs. |
+| Twilio (Verify)                     | Batch 2 live | ⬜ Stubbed. OTP is accepted without a real SMS. |
+| Firebase (Cloud Messaging)          | Batch 11     | ✅ Real project, live service account. Push actually sends. |
+| Email sending                       | Batch 11     | ✅ **SES**, replacing the generic SMTP plan. In AWS sandbox — delivers only to verified addresses. Nothing user-facing sends email yet, so this gates nothing. |
+| Stripe                              | Batch 13     | ⬜ Built and tested against mocks. Checkout answers `SERVICE_UNAVAILABLE` until keys are attached. |
+| Apple Developer / App Store Connect | —            | **Out of scope** (§1.2j) — the mobile team owns it. Returns if RevenueCat is adopted. |
+| Google Play Console                 | —            | **Out of scope** (§1.2l). Same. |
+| Twilio Video                        | Batch 14     | ⬜ The `twilio` SDK is already installed for Verify and issues Video tokens too, so the batch builds without credentials. |
 
 ---
 

@@ -44,7 +44,7 @@ The eight modes: `dating`, `study_buddy`, `networking`, `trading`, `foodie`, `cu
 | Push       | Firebase Cloud Messaging                                                                                         |
 | SMS / OTP  | Twilio Verify                                                                                                    |
 | Video      | Twilio Video, behind a `VideoProvider` interface                                                                 |
-| Payments   | Apple StoreKit 2 + Google Play Billing (primary), Stripe (US web link-out)                                       |
+| Payments   | **Stripe only** (decision #13). Behind a `PaymentProvider` interface, so a store or RevenueCat is a new class      |
 | Jobs       | BullMQ + Redis                                                                                                   |
 | Logging    | Pino                                                                                                             |
 | Testing    | Jest + Supertest against a real Postgres                                                                         |
