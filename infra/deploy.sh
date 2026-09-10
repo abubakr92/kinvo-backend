@@ -21,20 +21,67 @@ APP_DIR=/opt/kinvo
 SRC_DIR="$APP_DIR/src"
 
 echo "=== fetching source ==="
+
+# The extraction directory is REPLACED, not written over.
+#
+# `tar xzf` unpacks the archive on top of whatever is already there and never
+# removes a file the archive does not contain. So every file deleted in a commit
+# stayed on this instance from the previous deploy, and the build compiled a mix
+# of the new tree and orphans of the old one.
+#
+# That is not a subtle failure either: a deleted module keeps importing packages
+# that have since been uninstalled and symbols that no longer exist, so tsc
+# fails on files that are not in the repository any more — and the error names
+# paths a developer cannot find, because locally they are gone.
+#
+# Deleting the directory first makes the deployed tree exactly the archive.
+# Safe because it holds nothing but extracted source: .env and the compose file
+# live in $APP_DIR, one level up.
+rm -rf "$SRC_DIR"
 mkdir -p "$SRC_DIR"
 cd "$SRC_DIR"
 aws s3 cp "s3://$BUCKET/_deploy/kinvo-src.tar.gz" . --region us-east-1
 tar xzf kinvo-src.tar.gz
 
-echo "=== building runtime image ==="
-docker build -t "$IMAGE" . 2>&1 | tail -5
+# Build output goes to a FILE, not through `tail`.
+#
+# It used to be piped straight into `tail -5`, which is fine when the build
+# works and useless when it does not: a compile error scrolls past in the
+# discarded lines and the deploy log shows only "exit code: 2". Diagnosing that
+# meant reproducing the build somewhere else to see an error the instance had
+# already printed.
+#
+# On success only the last few lines are echoed, so a working deploy stays
+# readable. On failure the tail of the real output is printed and the whole log
+# is kept on disk.
+BUILD_LOG=/tmp/kinvo-build.log
+
+build_image() {
+  local label="$1"
+  shift
+
+  echo "=== building $label ==="
+
+  if docker build "$@" . > "$BUILD_LOG" 2>&1; then
+    tail -3 "$BUILD_LOG"
+    return 0
+  fi
+
+  echo "--- BUILD FAILED: last 60 lines of $BUILD_LOG ---"
+  tail -60 "$BUILD_LOG"
+  echo "--- compiler diagnostics, if any ---"
+  grep -E "error TS[0-9]+|FATAL ERROR|heap out of memory|Killed" "$BUILD_LOG" | head -30 || true
+  echo "--- full log retained at $BUILD_LOG ---"
+  return 1
+}
+
+build_image "runtime image" -t "$IMAGE"
 
 # The runtime image installs production dependencies only, so the Prisma CLI is
 # absent by design — it is a build tool, not something the API needs at run
 # time. Migrations therefore run from the builder stage, which has it. This also
 # keeps the CLI and its dependencies out of the image that faces the internet.
-echo "=== building migrator (builder stage) ==="
-docker build --target builder -t kinvo-migrator . 2>&1 | tail -3
+build_image "migrator (builder stage)" --target builder -t kinvo-migrator
 
 echo "=== applying migrations ==="
 docker run --rm \
