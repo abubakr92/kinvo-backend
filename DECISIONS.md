@@ -8,7 +8,7 @@ Three rules for this file:
 2. Every action taken against the repository or the environment gets logged here.
 3. Nothing here overrides `KINVO_BACKEND_BUILD.md`. That document is the specification; this one is the audit trail.
 
-Roles below: **PO** = product owner (Abubakr). **Eng** = the implementing agent.
+Roles below: **PO** = product owner **Eng** = the implementing agent.
 
 ---
 
@@ -16,11 +16,11 @@ Roles below: **PO** = product owner (Abubakr). **Eng** = the implementing agent.
 
 ### 1.1 Resolved by the specification — do not re-ask
 
-| #   | Decision                                                                                           | Source                 |
-| --- | -------------------------------------------------------------------------------------------------- | ---------------------- |
-| 1   | **Database: PostgreSQL 16 + PostGIS.** S3 stores media bytes only, never application records.      | Spec §6, confirmed Eng |
-| 4   | **Trading mode is an interest category only.** No trading, transfers, brokerage, or market data.   | Spec §1, §6            |
-| 13  | **Payment rails:** Apple StoreKit 2 + Google Play Billing primary; Stripe as US-only web link-out. | Spec §2, §6            |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                   | Source                 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| 1   | **Database: PostgreSQL 16 + PostGIS.** S3 stores media bytes only, never application records.                                                                                                                                                                                                                                                                                              | Spec §6, confirmed Eng |
+| 4   | **Trading mode is an interest category only.** No trading, transfers, brokerage, or market data.                                                                                                                                                                                                                                                                                           | Spec §1, §6            |
+| 13  | ~~**Payment rails:** Apple StoreKit 2 + Google Play Billing primary; Stripe as US-only web link-out.~~ **SUPERSEDED — see §1.2o.** Payments left this codebase entirely on 2026-09-10; RevenueCat is handled in the mobile app. Kept struck through rather than deleted, because this table records what the SPECIFICATION said and a reader comparing the two should see that it changed. | Spec §2, §6            |
 
 ### 1.2 Resolved during this engagement
 
@@ -356,7 +356,6 @@ Newest last. Every entry is something that changed the repository or the machine
 - **Verified before committing:** `.env` is ignored (`.gitignore:5`) and `node_modules/` is ignored (`.gitignore:1`). No secret or dependency directory is tracked.
 - Initial commit: 41 files, Batch 0 foundation.
 - Created this file.
-- **Resolved:** remote `origin` set to `https://github.com/abubakr92/kinvo-backend.git` (supplied by PO). Repository was empty, so `main` pushed cleanly with no merge. Upstream tracking configured.
 - **Verified after push:** no `.env`, `.pem`, `.key`, or credentials file appears in any commit in history. 44 files tracked.
 - **Resolved:** `KINVO_BACKEND_BUILD.md` was missing from the repository. Eng deliberately did not transcribe it from the chat — a reconstructed specification could drift from the master in ways nobody would notice, and this document governs fifteen batches of work. Located the canonical copy at `C:\Users\hp\Downloads\KINVO_BACKEND_BUILD.md` and copied it into the repository root unmodified (39.1 KB, 556 lines, all ten sections present). Verified clean UTF-8 — the corruption seen when the document was pasted into chat was a paste artifact, and a second apparent corruption was PowerShell 5.1 misreading UTF-8-without-BOM as ANSI. `CLAUDE.md`'s reference to the specification now resolves.
 - **Defect found in the specification, not fixed:** in §1, a stray blank line at line 109 splits the eight-mode table into a four-row table followed by four orphaned lines of literal pipe text. Content is intact — all eight modes are present and match what has been built. Cosmetic only; renders wrongly. Left for PO to correct, since this is the governing document.
