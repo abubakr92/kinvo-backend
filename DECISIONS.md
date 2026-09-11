@@ -646,6 +646,51 @@ This is the hazard CLAUDE.md already flags under Migrations, and it fired on
 the first generated migration since those indexes were written. **Read
 generated SQL before applying it.**
 
+### 2026-09-11 — Two bugs staging caught that tests could not
+
+**Providers branched on `NODE_ENV` instead of the integration waiver.**
+
+Staging runs `NODE_ENV=production` with `REQUIRE_THIRD_PARTY_INTEGRATIONS=false`,
+which exists so an environment with no Twilio, Google or Apple accounts still
+serves. Both the OTP provider and the video provider tested `isProduction`
+alone — true on staging — so they threw a raw Error and the endpoint answered
+**500** rather than falling back to a stub.
+
+**Phone sign-in had been broken on staging since Batch 2.** Nobody noticed
+because nothing had exercised it there; it surfaced only when a video call hit
+the identical guard, copied from it. Both now test
+`thirdPartyIntegrationsRequired` (production AND the waiver), exported from
+`env.ts`. Real production leaves the waiver at its default, so the hard stop
+still fires where it matters.
+
+The existing waiver tests covered env PARSING — whether the process boots —
+and never which provider the waiver then SELECTED, which is why a suite at
+900-plus tests missed it for six batches. `tests/unit/provider-fallback.test.ts`
+now covers selection under four environments and fails against the old code.
+
+**Seeded matches expired, and took three features down with them.**
+
+`seedConnections` goes through `createMatchIfMutual` deliberately, so seeded
+matches inherit the production 14-day TTL. Right for the creation path, wrong
+for the data: two weeks after a seed every seeded match expires, and chat,
+plans and calling all refuse at once because all three check reachability.
+Staging had been in that state since 2026-09-09 and read as "the API is
+broken". Dev matches are now pushed a year out after creation; staging's rows
+were refreshed.
+
+**What both have in common.** Neither was reachable from the test suite,
+because both are properties of a DEPLOYED environment — one of its
+configuration, one of its data ageing. Staging is not a formality before a
+release; it is the only place these two classes of bug exist.
+
+**Batch 14 verified end to end on staging:** call started, room name derives
+from the call id, token TTL ~3600s, both participants hold tokens for the same
+room, client-supplied `room_name` 400s, outsider 404s on token and end,
+initiator 403s answering their own call, flag records without ending, invalid
+action 400s, duration measured from `answered_at` (25s), hang-up idempotent,
+token after the call 409s, history carries no token. 121 endpoints; 33
+parameterless GETs 2xx apart from the two moderator-only 403s.
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
