@@ -44,6 +44,16 @@ module.exports = {
   // parallel workers would wipe each other's rows mid-test. `npm test` passes
   // --runInBand, but this makes a bare `npx jest` safe too rather than leaving
   // it as a convention someone can forget.
+  //
+  // WHAT THIS DOES NOT PROTECT AGAINST: two separate jest PROCESSES against the
+  // same database. This setting is per-process, so running a focused suite while
+  // a full run is going produces failures that look nothing like their cause —
+  // `40P01 deadlock detected` inside the entitlement seed, and truncations
+  // landing mid-test in whichever run got there second. Both runs then report
+  // failures that neither the code nor the tests are responsible for.
+  //
+  // One test process per database. In CI that means one database per job, not a
+  // shared instance two jobs happen to point at.
   maxWorkers: 1,
 
   clearMocks: true,

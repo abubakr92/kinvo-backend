@@ -1,5 +1,5 @@
 import { API_PREFIX } from '@config/constants';
-import { Mode, prisma } from '@/db/prisma';
+import { Mode, NotificationCategory, prisma } from '@/db/prisma';
 import { setPushProvider } from '@modules/notifications/providers';
 import { notify } from '@modules/notifications/notifications.service';
 import type { PushMessage, PushProvider, PushResult } from '@/providers/push.provider';
@@ -388,7 +388,16 @@ describe('preferences', () => {
     const response = await api.get(`${NOTIFICATIONS}/preferences`).set(authHeader(tokens));
 
     expect(response.status).toBe(200);
-    expect(response.body.data.preferences).toHaveLength(8);
+
+    // Derived from the enum rather than hardcoded. A literal count means every
+    // new notification category breaks this test for no reason, which trains
+    // people to bump the number without reading what it was protecting — that
+    // EVERY category comes back, defaults filled in, not that there are eight.
+    const allCategories = Object.values(NotificationCategory);
+    expect(response.body.data.preferences).toHaveLength(allCategories.length);
+    expect(
+      response.body.data.preferences.map((p: { category: string }) => p.category).sort(),
+    ).toEqual([...allCategories].sort());
 
     const system = response.body.data.preferences.find(
       (p: { category: string }) => p.category === 'system',

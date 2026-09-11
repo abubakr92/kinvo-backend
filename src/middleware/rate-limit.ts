@@ -194,3 +194,28 @@ export const generalRateLimit = build({
   windowMs: 15 * 60 * 1000,
   limit: 300,
 });
+
+/**
+ * Starting a video call (Batch 14).
+ *
+ * The general limiter allows 300 requests per quarter hour, which for this
+ * endpoint means ringing someone's phone 300 times. Starting a call is one of
+ * very few actions that makes another person's device demand attention
+ * immediately, so it gets its own ceiling.
+ *
+ * Keyed on the CALLER'S ACCOUNT, not their IP. Mobile users sit behind carrier
+ * NAT in large groups, so an IP bucket would throttle strangers together and
+ * still leave one account free to spam from several addresses. The abuse here
+ * is an account behaviour.
+ *
+ * Ten in five minutes is far above any real use — a person redialling a dropped
+ * call a few times stays well inside it — and far below what would be needed to
+ * harass somebody.
+ */
+export const callStartRateLimit = build({
+  name: 'call-start',
+  windowMs: 5 * 60 * 1000,
+  limit: 10,
+  key: (req) => `user:${req.user?.id ?? `ip:${clientIp(req)}`}`,
+  message: 'You are starting calls too quickly. Please wait a moment.',
+});

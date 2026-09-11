@@ -1,9 +1,9 @@
 import { DISCOVERY } from '@config/constants';
-import { MatchStatus, type Mode, type Prisma, prisma } from '@/db/prisma';
+import { MatchStatus, type Mode, type Prisma, UserStatus, prisma } from '@/db/prisma';
 import { requireFeature } from '@modules/entitlements/entitlements.service';
 import { ENTITLEMENT_KEYS } from '@modules/entitlements/entitlements.types';
 import { getPrimaryPhotoUrlsFor } from '@modules/media/photos.service';
-import { getBlockedUserIds } from '@modules/safety/block.service';
+import { getBlockedUserIds, isBlockedBetween } from '@modules/safety/block.service';
 import { onlineStatusFor } from '@/realtime/presence';
 import { ApiError } from '@utils/api-error';
 import { USER_COMPACT_SELECT, type UserCompact, toUserCompact } from '@utils/compact';
@@ -65,6 +65,34 @@ export function otherUserId(
   viewerId: string,
 ): string {
   return match.user_a_id === viewerId ? match.user_b_id : match.user_a_id;
+}
+
+/**
+ * Can these two still reach each other through this match?
+ *
+ * ONE definition, deliberately. Messaging and calling ask exactly the same
+ * question, and this used to be a private helper inside the chat service.
+ * Copying five lines into a second module is how the two drift: the copy gets
+ * updated when a rule changes and the original does not, or vice versa, and the
+ * one that falls behind is a feature that no longer checks blocks.
+ *
+ * Callers phrase their own error. What they must NOT do is tell the reasons
+ * apart in the response — "they blocked you", "they unmatched you" and "the
+ * match expired" are different facts, and distinguishing them lets someone
+ * confirm a block by elimination (spec §4.4, §5.5).
+ */
+export async function isPairReachable(
+  match: { status: MatchStatus; expires_at: Date },
+  viewerId: string,
+  other: { id: string; deleted_at: Date | null; status: UserStatus },
+): Promise<boolean> {
+  return (
+    match.status === MatchStatus.active &&
+    !isExpired(match) &&
+    other.deleted_at === null &&
+    other.status === UserStatus.active &&
+    !(await isBlockedBetween(viewerId, other.id))
+  );
 }
 
 /**

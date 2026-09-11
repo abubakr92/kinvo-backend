@@ -52,6 +52,10 @@ export const SERVER_EVENTS = {
   CONVERSATION_UPDATED: 'conversation:updated',
   PRESENCE_UPDATE: 'presence:update',
   ENTITLEMENTS_UPDATED: 'entitlements:updated',
+  CALL_INCOMING: 'call:incoming',
+  CALL_ANSWERED: 'call:answered',
+  CALL_DECLINED: 'call:declined',
+  CALL_ENDED: 'call:ended',
   ERROR: 'error',
 } as const;
 
@@ -139,6 +143,42 @@ export const SERVER_EVENT_SCHEMAS = {
     tier: z.string(),
   }),
 
+  /**
+   * Someone you matched with is calling. This is what makes the callee's phone
+   * ring, so it is the one event a client must handle before it has fetched
+   * anything.
+   *
+   * The push notification carries the same call_id. A client that receives both
+   * must treat them as one call, not two.
+   */
+  [SERVER_EVENTS.CALL_INCOMING]: z.object({
+    call_id: z.string().uuid(),
+    match_id: z.string().uuid(),
+    mode: z.nativeEnum(Mode),
+    from: userCompactShape,
+  }),
+
+  /** The callee picked up. Stop the ringing UI and connect to the room. */
+  [SERVER_EVENTS.CALL_ANSWERED]: z.object({
+    call_id: z.string().uuid(),
+  }),
+
+  /** The callee refused. Distinct from ended so the caller can say so. */
+  [SERVER_EVENTS.CALL_DECLINED]: z.object({
+    call_id: z.string().uuid(),
+  }),
+
+  /**
+   * The other side hung up, or a safety action ended the call.
+   *
+   * duration_seconds is null when the call was never answered — a missed call
+   * has no duration, and zero would read as a call that connected silently.
+   */
+  [SERVER_EVENTS.CALL_ENDED]: z.object({
+    call_id: z.string().uuid(),
+    duration_seconds: z.number().int().nullable(),
+  }),
+
   /** Same code vocabulary as REST, so the client branches on one enum. */
   [SERVER_EVENTS.ERROR]: z.object({
     code: z.string(),
@@ -157,6 +197,9 @@ export type ConversationUpdatedPayload = z.infer<
 >;
 export type PresenceUpdatePayload = z.infer<
   (typeof SERVER_EVENT_SCHEMAS)[typeof SERVER_EVENTS.PRESENCE_UPDATE]
+>;
+export type CallIncomingPayload = z.infer<
+  (typeof SERVER_EVENT_SCHEMAS)[typeof SERVER_EVENTS.CALL_INCOMING]
 >;
 
 /** Prose for the published documentation, kept beside the shapes it describes. */
@@ -179,6 +222,13 @@ export const EVENT_DESCRIPTIONS: Record<string, string> = {
     'Someone you have an active match with came online or went offline. Never sent across a block.',
   [SERVER_EVENTS.ENTITLEMENTS_UPDATED]:
     'The plan changed. Re-read GET /me/entitlements rather than trusting a cached matrix.',
+  [SERVER_EVENTS.CALL_INCOMING]:
+    'Someone you matched with is calling. Handle this before anything else — it is what rings the phone. The matching push notification carries the same call_id; treat both as one call. Answer with POST /calls/{id}/answer to get a room token.',
+  [SERVER_EVENTS.CALL_ANSWERED]:
+    'The callee picked up. Stop the ringing UI and join the room with the token you already hold.',
+  [SERVER_EVENTS.CALL_DECLINED]: 'The callee refused. Separate from call:ended on purpose.',
+  [SERVER_EVENTS.CALL_ENDED]:
+    'The call is over — the other side hung up, or a safety action ended it. duration_seconds is null for a call that was never answered.',
   [SERVER_EVENTS.ERROR]:
     'Something went wrong with an event you sent. Uses the same error codes as the REST API.',
 };

@@ -8,6 +8,7 @@ import {
   type MatchNewPayload,
   type MessageNewPayload,
   SERVER_EVENTS,
+  type CallIncomingPayload,
 } from './events';
 import { conversationRoom, userRoom } from './rooms';
 
@@ -95,6 +96,38 @@ export function emitMatch(userId: string, payload: MatchNewPayload): void {
 
 export function emitEntitlementsUpdated(userId: string, tier: string): void {
   emitToUser(userId, SERVER_EVENTS.ENTITLEMENTS_UPDATED, { tier });
+}
+
+/**
+ * Call signalling (Batch 14).
+ *
+ * Named emitters rather than raw `emitToUser(id, 'call:incoming', …)` calls in
+ * the service, for the same reason the message emitters exist: the event name
+ * and its payload shape stay next to each other and next to the schema that
+ * documents them. A typo'd string in a service is an event no client ever
+ * receives, and nothing fails.
+ */
+export function emitCallIncoming(userId: string, payload: CallIncomingPayload): void {
+  emitToUser(userId, SERVER_EVENTS.CALL_INCOMING, payload);
+}
+
+export function emitCallAnswered(userId: string, callId: string): void {
+  emitToUser(userId, SERVER_EVENTS.CALL_ANSWERED, { call_id: callId });
+}
+
+export function emitCallDeclined(userId: string, callId: string): void {
+  emitToUser(userId, SERVER_EVENTS.CALL_DECLINED, { call_id: callId });
+}
+
+export function emitCallEnded(
+  userId: string,
+  callId: string,
+  durationSeconds: number | null,
+): void {
+  emitToUser(userId, SERVER_EVENTS.CALL_ENDED, {
+    call_id: callId,
+    duration_seconds: durationSeconds,
+  });
 }
 
 /**

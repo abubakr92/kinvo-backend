@@ -11,7 +11,7 @@ import { claimAsset } from '@modules/media/media.service';
 import { type BucketName, presignDownload } from '@/providers/s3.provider';
 import { getPrimaryPhotoUrlsFor } from '@modules/media/photos.service';
 import { getBlockedUserIds, isBlockedBetween } from '@modules/safety/block.service';
-import { isExpired, otherUserId } from '@modules/matches/matches.service';
+import { isExpired, isPairReachable, otherUserId } from '@modules/matches/matches.service';
 import { scanSubject } from '@modules/moderation/moderation.service';
 import { notify } from '@modules/notifications/notifications.service';
 import { otherParticipantId } from '@/realtime/participants';
@@ -345,18 +345,15 @@ async function assertWritable(
 ): Promise<void> {
   const other = participantFor(conversation, viewerId);
 
-  const closed =
-    conversation.match.status !== MatchStatus.active ||
-    isExpired(conversation.match) ||
-    other.deleted_at !== null ||
-    other.status !== 'active' ||
-    (await isBlockedBetween(viewerId, other.id));
-
-  if (closed) {
-    throw new ApiError(ERROR_CODES.FORBIDDEN, 'This conversation is closed.', {
-      is_writable: false,
-    });
+  // The rule itself lives in matches.service, because calling asks the same
+  // question and a second copy of it would eventually stop matching this one.
+  if (await isPairReachable(conversation.match, viewerId, other)) {
+    return;
   }
+
+  throw new ApiError(ERROR_CODES.FORBIDDEN, 'This conversation is closed.', {
+    is_writable: false,
+  });
 }
 
 const MEDIA_KIND_FOR: Partial<Record<MessageType, MediaKind>> = {

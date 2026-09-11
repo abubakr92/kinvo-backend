@@ -43,7 +43,7 @@ The eight modes: `dating`, `study_buddy`, `networking`, `trading`, `foodie`, `cu
 | Media      | AWS S3, presigned URLs                                                                                           |
 | Push       | Firebase Cloud Messaging                                                                                         |
 | SMS / OTP  | Twilio Verify                                                                                                    |
-| Video      | Twilio Video, behind a `VideoProvider` interface                                                                 |
+| Video      | Twilio Video token issuance, behind a `VideoProvider` interface                                                  |
 | Payments   | **None in this codebase.** No processor, no checkout, no webhook — see the Subscriptions section below            |
 | Jobs       | BullMQ + Redis                                                                                                   |
 | Logging    | Pino                                                                                                             |
@@ -158,6 +158,21 @@ Never widen `req.user` from a token claim. `authenticate` loads the user on ever
 
 **Redis in tests.** The client uses `lazyConnect` with the offline queue **disabled** under test, so a command issued before an explicit `connectRedis()` fails instead of buffering. Any suite touching quota counters must call it in `beforeAll` and `disconnectRedis()` in `afterAll`. Skipping it does not fail loudly — `readCount` swallows connection errors and reports zero used, which looks exactly like a fresh counter, so the suite passes while proving nothing. Never wrap a live Redis call in `jest.useFakeTimers()`: ioredis drives its command queue on real timers and the call never resolves.
 
+**Calls (spec §5.7, §7).** A token is scoped to ONE room and is short-lived.
+
+The spec is explicit: *"never issue a token that grants access to arbitrary rooms."*
+A leak here is not a data leak — it is a stranger appearing on someone's camera.
+
+- The room name is **derived from the call id** and stored on the row. `issueToken` takes that stored name, not an id it re-derives, so the room a client is told to join and the room its token admits it to are the same string by construction. A `VideoGrant` with no room grants every room on the account, so `room` is never optional.
+- Starting a call names a **match**. Never a user, never a room — a client-supplied room name is the hole the spec is warning about, and the schema is `.strict()` so sending one is a 400.
+- The permission check is `isPairReachable`, **the same function messaging uses**. It lives in `matches.service.ts` precisely so calling cannot drift into being the laxer of the two. Do not copy it.
+- It is re-checked on **every token issue**, not just at the start. Blocking someone who is on your screen has to stop their next reconnect rather than take effect after they hang up.
+- Token TTL is one hour, not ten minutes: Twilio disconnects a participant when their token expires. `GET /calls/{id}/token` re-issues, and that endpoint is what makes a short TTL workable instead of merely strict.
+- Every refusal answers the **same 404** — blocked, unmatched, expired, account gone. Telling them apart confirms a block by elimination.
+- Ringing timeout is decided at **read time**, like match expiry. A row still marked `ringing` reads as `missed`, so a late sweep never leaves a call ringing in history.
+- Duration is measured from `answered_at`, not `started_at`. A call that rang for forty seconds and was picked up for ten lasted ten. Unanswered calls carry `null`, not `0` — zero reads as a call that connected silently.
+- Hang-up is **idempotent**. Both apps send it, and the second must not surface an error.
+- Safety actions are recorded **before** anything else happens, because the record is the point: a pattern of flags is what moderation acts on. `end_and_report` ends the call first — someone reaching for it wants the call to stop. `note` stays optional; a person reaching for a safety control mid-call cannot write an explanation.
 **Subscriptions (spec §5.10).** Never grant entitlement from a client claim.
 
 Payment processing is **not in this codebase**. There is no processor, no checkout,
@@ -279,6 +294,13 @@ Both buckets are private, so every media URL is presigned and time-limited, mint
 6. **Stop.** Do not start the next batch unbidden.
 
 When blocked, ask. Do not invent a business rule and bury it in code.
+
+**One test process per database.** `maxWorkers: 1` and `--runInBand` serialise
+suites WITHIN a run; nothing serialises two runs. Starting a focused suite while
+a full run is going gives both of them failures that look nothing like the cause
+— `40P01 deadlock detected` in the entitlement seed, and `TRUNCATE` landing
+mid-test in whichever run got there second. Wait for a run to finish, or point
+the second one at its own database. In CI: one database per job.
 
 **Tests are not optional.** Integration tests per endpoint covering happy path, validation failure, auth failure, and the permission boundary (can user A touch user B's resource?). Unit tests for pure logic. Real Postgres, mocks only for external HTTP. 80% line coverage on `src/` excluding config. Tests seed and clean their own data and run in any order.
 

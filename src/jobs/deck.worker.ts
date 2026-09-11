@@ -5,6 +5,7 @@ import { generateDeck, usersNeedingDecks } from '@modules/discovery/deck.service
 import { sweepExpiredMatches } from '@modules/matches/matches.service';
 import { sendPlanReminders } from '@modules/notifications/reminders.service';
 import { sweepLiveLocations } from '@modules/safety/location.service';
+import { sweepRingingCalls } from '@modules/calls/calls.service';
 import { sweepCompletedPlans } from '@modules/plans/plans.service';
 import { sweepExpiredSubscriptions } from '@modules/subscriptions/subscriptions.service';
 import { logger } from '@utils/logger';
@@ -44,13 +45,24 @@ export function startDeckWorker(): Worker<DeckGenerationJob> {
         // Location trails ride the reminder cadence rather than the daily one.
         // spec §5.7 asks for auto-expiry when a plan ends, and a daily sweep
         // would leave a cancelled evening's trail sitting for hours.
-        const [reminded, trails, completed] = await Promise.all([
+        // Ringing calls ride this cadence rather than the daily one, because a
+        // call that rang out sixty seconds ago should not still say "ringing" in
+        // history until tomorrow. Bookkeeping either way: the service already
+        // reports a timed-out call as missed at read time, so this being late
+        // changes nothing a user sees.
+        const [reminded, trails, completed, rungOut] = await Promise.all([
           sendPlanReminders(),
           sweepLiveLocations(),
           sweepCompletedPlans(),
+          sweepRingingCalls(),
         ]);
 
-        return { reminded, trails_pruned: trails, plans_completed: completed };
+        return {
+          reminded,
+          trails_pruned: trails,
+          plans_completed: completed,
+          calls_missed: rungOut,
+        };
       }
 
       if (job.name === SCHEDULER_JOB_NAME) {

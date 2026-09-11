@@ -62,6 +62,16 @@ export const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
 
+  /**
+   * Twilio Video (spec §7, Batch 14).
+   *
+   * An API key pair, NOT the account auth token. The auth token is the master
+   * credential for the whole account; an API key can be revoked on its own, so
+   * a leaked video credential does not also hand over SMS and billing.
+   */
+  TWILIO_API_KEY_SID: z.string().optional(),
+  TWILIO_API_KEY_SECRET: z.string().optional(),
+
   // Comma-separated: iOS, Android, and web client IDs are all valid audiences.
   GOOGLE_OAUTH_CLIENT_IDS: z
     .string()
@@ -234,6 +244,8 @@ const PRODUCTION_REQUIRED: { key: keyof Env; message: string }[] = [
   { key: 'TWILIO_ACCOUNT_SID', message: 'required in production for OTP delivery' },
   { key: 'TWILIO_AUTH_TOKEN', message: 'required in production for OTP delivery' },
   { key: 'TWILIO_VERIFY_SERVICE_SID', message: 'required in production for OTP delivery' },
+  { key: 'TWILIO_API_KEY_SID', message: 'required in production to issue video tokens' },
+  { key: 'TWILIO_API_KEY_SECRET', message: 'required in production to issue video tokens' },
   { key: 'GOOGLE_OAUTH_CLIENT_IDS', message: 'required in production for Google sign-in' },
   { key: 'APPLE_CLIENT_IDS', message: 'required in production for Apple sign-in' },
 ];

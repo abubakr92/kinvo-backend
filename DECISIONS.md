@@ -245,11 +245,47 @@ failed.
 mirror is a single fresh commit, so the repository a contractor sees carries
 neither.
 
+### 1.2p Resolved during Batch 14 (video calling)
+
+| Decision | Date | By | Reasoning |
+| --- | --- | --- | --- |
+| **Token TTL is one hour, not ten minutes.** | 2026-09-10 | Eng | Eng first proposed ten minutes as "short-lived". Twilio DISCONNECTS a participant when their token expires, so ten minutes would have cut people off mid-conversation. An hour plus a re-issue endpoint gets the security property without the defect: a leaked token is worth little, and a long call reconnects. |
+| **Verification is NOT required to call, in v1.** | 2026-09-10 | Eng | The spec leaves this to policy ("both verified if policy requires"). No such policy exists, and imposing one would block calling for nearly everyone, since verification is only mandatory for Cuddle. Behind `REQUIRE_VERIFICATION_TO_CALL`, so turning it on is one line. |
+| **Ringing times out after 60 seconds, decided at read time.** | 2026-09-10 | Eng | Same shape as match expiry. A row still marked `ringing` reads as `missed`, so a late or failed sweep cannot leave a call ringing in someone's history. |
+| **`call` added to `NotificationCategory`.** | 2026-09-10 | Eng | `system` would have meant that muting system notices also silenced calls; `safety` would have made calls unmutable, since safety notifications cannot be muted. Neither is right, so the category is its own — a one-value enum addition. |
+| **A second call on a live match returns the existing call.** | 2026-09-10 | Eng | Two rows means two rooms, and the pair sit in different ones wondering why they cannot hear each other. |
+| **An API key pair, not the account auth token.** | 2026-09-10 | Eng | The auth token is the master credential for the whole Twilio account. An API key can be revoked on its own, so a leaked video credential does not also hand over SMS and billing. |
+
+**The shared permission gate.** Calling asks exactly the question messaging
+asks — same match, still active, not expired, other account alive, not blocked
+— and that logic was a PRIVATE helper inside `chat.service.ts`. It is now
+`isPairReachable` in `matches.service.ts`, and chat delegates to it.
+
+Copying five lines would have been quicker and is the thing worth avoiding: the
+copy gets updated when a rule changes and the original does not, and whichever
+falls behind is a feature that has quietly stopped checking blocks. It is also
+re-checked on every token issue rather than only at the start, so blocking
+someone who is on your screen stops their next reconnect instead of taking
+effect after they hang up.
+
 ### 1.3 Still open
 
 **Carried from Batch 13:**
 
-- **Make `seedEntitlements` atomic.** It is a loop of independent statements — upsert a flag, upsert its three tier rows, repeat — so an interruption leaves the matrix half-applied. Because a missing flag fails CLOSED, the symptom is a paid feature silently switched off rather than an error. Written and reverted unverified; re-apply once the suite can run.
+- **`seedEntitlements` is not concurrency-safe, and now we know why it flaked.**
+  It is a loop of independent statements — upsert a flag, upsert its three tier
+  rows, repeat — so two processes seeding at once interleave and Postgres reports
+  `40P01 deadlock detected`. Reproduced on 2026-09-10 by running a focused suite
+  while a full run was in progress, which is almost certainly the original
+  unexplained flake this was first written to fix.
+
+  The fix is NOT a transaction on its own — a transaction can deadlock just the
+  same. It is either one test process per database (now documented in
+  `jest.config.js` and CLAUDE.md, and free), or a `pg_advisory_xact_lock` around
+  the seed if parallel CI jobs ever have to share one instance. Atomicity is
+  still worth having for the interruption case — a half-applied matrix fails
+  CLOSED, so the symptom is a paid feature silently switched off rather than an
+  error — but it is a separate concern from the deadlock.
 - **Build and adopt `Dockerfile.test`.** The suite cannot run natively on the current host. This also belongs in CI regardless.
 
 **Questions** — must be answered before the batch listed:
@@ -580,6 +616,36 @@ The correction went in as SQL mirroring the seed exactly. **Seeding a deployed
 environment has no supported path today** — worth fixing before there is data
 worth protecting.
 
+### 2026-09-10 — Batch 14: video calling
+
+- 7 endpoints, 121 total. No migration for the tables: `call_sessions` and
+  `call_safety_actions` were created in Batch 1. One migration for the `call`
+  notification category.
+- The provider is mocked-free: with no credentials it issues a token that is
+  deliberately NOT a JWT and could never authenticate against Twilio. A
+  plausible-looking fake would be worse — a client would believe it had
+  connected when it had not.
+- 32 tests. Most of them are the permission boundary, because that boundary is
+  the feature: it is the only thing between a stranger and someone's camera.
+
+**A generated migration tried to drop the PostGIS GIST indexes.**
+
+`prisma migrate dev` produced the enum addition and then four `DROP INDEX`
+statements against `profiles`, `venues`, `emergency_events` and
+`live_location_pings`. That is not drift. Those columns are
+`Unsupported("geography")` because Prisma cannot model them, so Prisma cannot
+see their indexes either and reads every one as something to remove.
+
+Applying it would have cost nothing at migrate time and turned every radius
+query into a sequential scan — the deck builder, venue search and the safety
+trail all go through them. A silent full-table scan on the hottest query in the
+product, with no error to notice.
+
+The drops were removed and the reason recorded in the migration file itself.
+This is the hazard CLAUDE.md already flags under Migrations, and it fired on
+the first generated migration since those indexes were written. **Read
+generated SQL before applying it.**
+
 ## 3. Batch plan and dependencies
 
 Status: ✅ done · ▶ current · ⬜ not started
@@ -601,7 +667,7 @@ Status: ✅ done · ▶ current · ⬜ not started
 | 11    | Notifications               | ✅     | **Firebase project + service account, SMTP credentials**     | —                              |
 | 12    | Safety, plans, venues       | ✅     | S3 (report evidence)                                         | Block visibility               |
 | 13    | Subscriptions (read-only)   | ✅     | None — payments are outside this codebase                    | —                              |
-| 14    | Video calling               | ⬜     | Twilio SDK already installed; credentials come later         | —                              |
+| 14    | Video calling               | ✅     | Twilio SDK already installed; credentials come later         | —                              |
 | 15    | Docs, hardening, load test  | ⬜     | —                                                            | — (admin is a separate repo)   |
 
 ### 3.1 Tooling timeline

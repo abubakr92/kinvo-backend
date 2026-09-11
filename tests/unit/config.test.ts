@@ -14,6 +14,10 @@ const PRODUCTION_CREDENTIALS: NodeJS.ProcessEnv = {
   TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
   TWILIO_AUTH_TOKEN: 'auth-token',
   TWILIO_VERIFY_SERVICE_SID: 'VA00000000000000000000000000000000',
+  // Batch 14. An API key pair rather than the account auth token, so a leaked
+  // video credential does not also hand over SMS and billing.
+  TWILIO_API_KEY_SID: 'SK00000000000000000000000000000000',
+  TWILIO_API_KEY_SECRET: 'api-key-secret',
   GOOGLE_OAUTH_CLIENT_IDS: 'client-id.apps.googleusercontent.com',
   APPLE_CLIENT_IDS: 'com.kinvo.app',
   CORS_ORIGINS: 'https://admin.kinvo.app',

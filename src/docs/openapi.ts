@@ -29,6 +29,7 @@ import {
   sharePlanSchema,
   updatePlanSchema,
 } from '@modules/plans/plans.schema';
+import { safetyActionSchema, startCallSchema } from '@modules/calls/calls.schema';
 import * as settingsSchema from '@modules/settings/settings.schema';
 import * as usersSchema from '@modules/users/users.schema';
 
@@ -1100,6 +1101,79 @@ export const ROUTES: RouteDoc[] = [
     auth: true,
     errors: [],
   },
+  // --- calls --------------------------------------------------------------
+  {
+    method: 'post',
+    path: '/calls',
+    tag: 'Calls',
+    summary: 'Start a video call',
+    description:
+      'Creates the call and returns a room token for YOU. The body names a **match**, never a user and never a room — a client-named room is how someone gets a token for a call they were not invited to. The other person receives a `call:incoming` socket event and a push carrying the same `call_id`; treat both as one call. Calling an already-live call on the same match returns that call rather than starting a second one, because two rooms for one conversation means two people in different rooms.',
+    body: startCallSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.NOT_FOUND, E.FORBIDDEN],
+  },
+  {
+    method: 'get',
+    path: '/calls',
+    tag: 'Calls',
+    summary: 'Call history',
+    description:
+      'Newest first, cursor-paginated. Carries no token — a finished call has nothing to join. A call that rang out reads as `missed` even before the sweep rewrites the column, so history never shows something as still ringing. `duration_seconds` is null for a call that was never answered; zero would read as a call that connected silently.',
+    auth: true,
+    errors: [],
+  },
+  {
+    method: 'post',
+    path: '/calls/{id}/answer',
+    tag: 'Calls',
+    summary: 'Answer',
+    description:
+      'Only the person who did NOT start the call may answer. Returns your room token. Answering a call that was declined, ended, or rang out is a 409 rather than a silent no-op — the app needs to know why nothing happened.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.FORBIDDEN, E.CONFLICT],
+  },
+  {
+    method: 'post',
+    path: '/calls/{id}/decline',
+    tag: 'Calls',
+    summary: 'Decline',
+    description:
+      'Only the callee. Emits `call:declined`, which is deliberately distinct from `call:ended` so the caller can say "declined" rather than "call ended".',
+    auth: true,
+    errors: [E.NOT_FOUND, E.FORBIDDEN, E.CONFLICT],
+  },
+  {
+    method: 'post',
+    path: '/calls/{id}/end',
+    tag: 'Calls',
+    summary: 'Hang up',
+    description:
+      'Either participant, at any live stage. **Idempotent** — both apps commonly send this on hang-up and the second must not surface an error. Duration is measured from when the call was ANSWERED, not from when it started ringing: a call that rang for forty seconds and was picked up for ten lasted ten.',
+    auth: true,
+    errors: [E.NOT_FOUND],
+  },
+  {
+    method: 'get',
+    path: '/calls/{id}/token',
+    tag: 'Calls',
+    summary: 'Re-issue a room token',
+    description:
+      'For a reconnect, or a call outstaying its token. Tokens are short-lived and scoped to exactly ONE room; this endpoint is what makes that workable rather than merely strict. The permission check runs again on every issue, so blocking someone mid-call stops their next reconnect instead of taking effect after they hang up. Refused once the call is over — a token for a finished room is a credential with no purpose.',
+    auth: true,
+    errors: [E.NOT_FOUND, E.CONFLICT],
+  },
+  {
+    method: 'post',
+    path: '/calls/{id}/safety',
+    tag: 'Calls',
+    summary: 'In-call safety action',
+    description:
+      '`flag`, `end_and_report`, or `send_live_update` (spec §5.7). The action is recorded before anything else happens, because the record is the point — a pattern of flags against one account is what moderation acts on. `end_and_report` ends the call FIRST and then files the report: someone reaching for this wants the call to stop. `note` is optional on purpose; a person reaching for a safety control mid-call is not in a position to write an explanation. The reported user is never told who reported them.',
+    body: safetyActionSchema,
+    auth: true,
+    errors: [E.VALIDATION_FAILED, E.NOT_FOUND],
+  },
   // --- entitlements -------------------------------------------------------
   {
     method: 'get',
@@ -1466,6 +1540,7 @@ export function buildOpenApiDocument(serverUrl: string): Record<string, unknown>
       { name: 'Plans', description: 'Date planning and trusted-contact sharing' },
       { name: 'Venues', description: 'Curated places, search, save, suggest' },
       { name: 'Subscriptions', description: 'Product catalogue and your current subscription' },
+      { name: 'Calls', description: 'Video call lifecycle, room tokens, in-call safety' },
       {
         name: 'Entitlements',
         description: 'Plan features and daily quotas',
