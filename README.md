@@ -154,3 +154,45 @@ and `/reports/review` returning 403 for a normal account is correct.
 dependencies only, so it has no `tsx` and cannot run `prisma/seed.ts`. Staging
 has been corrected with hand-written SQL when needed. Worth fixing before there
 is data worth protecting.
+
+---
+
+## The contract as files
+
+The running API serves `/api/v1/docs` (Swagger UI), `/api/v1/docs/openapi.json`
+and `/api/v1/docs/realtime.json`. Those stay the authority.
+
+`npm run docs:export` also writes them to `docs/`, and those files are
+**committed on purpose**: a generated contract in the repository turns a
+breaking change into a visible diff. Renaming an error code or dropping an
+endpoint shows up in review rather than being discovered by a client at runtime.
+
+```bash
+npm run docs:export     # -> docs/openapi.yaml, docs/realtime.json
+```
+
+## Load-testing the deck
+
+`GET /discovery/:mode/deck` is the only endpoint worth load-testing: it is the
+one place a PostGIS radius search, six simultaneous filters and a ranking pass
+run on every request, and it is the product's first screen. Everything else is
+an indexed lookup or a cursor page.
+
+```bash
+npm run db:up
+npm run dev                                  # in another terminal
+npm run loadtest:seed                        # LOAD_POPULATION=20000 by default
+npm run loadtest
+npx tsx tests/load/seed-population.ts --clear  # remove the synthetic users
+```
+
+The test measures latency percentiles **and** checks the query plan, because a
+load test passes happily on a sequential scan while the table is small and then
+falls over in production. It fails if the radius query stops using the GIST
+index — which is exactly what a generated migration tried to remove in Batch 14.
+
+Tunable through the environment: `LOAD_TARGET`, `LOAD_POPULATION`,
+`LOAD_DURATION`, `LOAD_CONNECTIONS`, `LOAD_VIEWERS`, `LOAD_P99_CEILING`.
+
+**Do not point it at staging.** That instance has under 2 GB of RAM shared with
+its own Postgres, so a run there measures the box, not the query.

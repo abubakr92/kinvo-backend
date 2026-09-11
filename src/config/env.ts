@@ -45,6 +45,22 @@ export const envSchema = z.object({
   // Accepted by express.json / express.urlencoded (e.g. "1mb", "512kb").
   JSON_BODY_LIMIT: z.string().min(2).default('1mb'),
 
+  /**
+   * Ceiling for the catch-all rate limiter, per IP per 15 minutes.
+   *
+   * Configurable for two reasons. A load test drives thousands of requests from
+   * ONE address and would otherwise measure this limiter rather than the
+   * endpoint — 300 successes followed by 429s, which is exactly what the first
+   * deck run produced.
+   *
+   * The second reason is not about testing. This limiter is keyed on IP, and
+   * mobile users sit behind carrier NAT in large groups, so a busy cell can
+   * share one address between many people. 300 per quarter hour is comfortable
+   * for one person and may not be for a hundred sharing an exit node. Being a
+   * config value means raising it is a deploy, not a release.
+   */
+  RATE_LIMIT_GENERAL_MAX: z.coerce.number().int().min(1).default(300),
+
   // --- Auth (Batch 2) ------------------------------------------------------
   // No defaults, ever. A signing secret with a fallback value is not a secret,
   // and a deployment that silently boots with a known key is forgeable.

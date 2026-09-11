@@ -2,7 +2,7 @@ import type { Request, RequestHandler, Response } from 'express';
 import rateLimit, { type Options } from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
 
-import { isTest } from '@config/env';
+import { env, isTest } from '@config/env';
 import { redis } from '@/db/redis';
 import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
@@ -192,14 +192,15 @@ export const refreshRateLimit = build({
 export const generalRateLimit = build({
   name: 'general',
   windowMs: 15 * 60 * 1000,
-  limit: 300,
+  limit: env.RATE_LIMIT_GENERAL_MAX,
 });
 
 /**
  * Starting a video call (Batch 14).
  *
- * The general limiter allows 300 requests per quarter hour, which for this
- * endpoint means ringing someone's phone 300 times. Starting a call is one of
+ * The general limiter allows RATE_LIMIT_GENERAL_MAX requests per quarter hour,
+ * which for this endpoint means ringing someone's phone that many times.
+ * Starting a call is one of
  * very few actions that makes another person's device demand attention
  * immediately, so it gets its own ceiling.
  *

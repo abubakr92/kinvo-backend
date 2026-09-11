@@ -44,7 +44,7 @@ The eight modes: `dating`, `study_buddy`, `networking`, `trading`, `foodie`, `cu
 | Push       | Firebase Cloud Messaging                                                                                         |
 | SMS / OTP  | Twilio Verify                                                                                                    |
 | Video      | Twilio Video token issuance, behind a `VideoProvider` interface                                                  |
-| Payments   | **None in this codebase.** No processor, no checkout, no webhook — see the Subscriptions section below            |
+| Payments   | **None in this codebase.** No processor, no checkout, no webhook — see the Subscriptions section below           |
 | Jobs       | BullMQ + Redis                                                                                                   |
 | Logging    | Pino                                                                                                             |
 | Testing    | Jest + Supertest against a real Postgres                                                                         |
@@ -160,7 +160,7 @@ Never widen `req.user` from a token claim. `authenticate` loads the user on ever
 
 **Calls (spec §5.7, §7).** A token is scoped to ONE room and is short-lived.
 
-The spec is explicit: *"never issue a token that grants access to arbitrary rooms."*
+The spec is explicit: _"never issue a token that grants access to arbitrary rooms."_
 A leak here is not a data leak — it is a stranger appearing on someone's camera.
 
 - The room name is **derived from the call id** and stored on the row. `issueToken` takes that stored name, not an id it re-derives, so the room a client is told to join and the room its token admits it to are the same string by construction. A `VideoGrant` with no room grants every room on the account, so `room` is never optional.
@@ -173,7 +173,7 @@ A leak here is not a data leak — it is a stranger appearing on someone's camer
 - Duration is measured from `answered_at`, not `started_at`. A call that rang for forty seconds and was picked up for ten lasted ten. Unanswered calls carry `null`, not `0` — zero reads as a call that connected silently.
 - Hang-up is **idempotent**. Both apps send it, and the second must not surface an error.
 - Safety actions are recorded **before** anything else happens, because the record is the point: a pattern of flags is what moderation acts on. `end_and_report` ends the call first — someone reaching for it wants the call to stop. `note` stays optional; a person reaching for a safety control mid-call cannot write an explanation.
-**Subscriptions (spec §5.10).** Never grant entitlement from a client claim.
+  **Subscriptions (spec §5.10).** Never grant entitlement from a client claim.
 
 Payment processing is **not in this codebase**. There is no processor, no checkout,
 no billing portal, no webhook and no receipt validation. Purchasing happens in the
@@ -308,36 +308,36 @@ the second one at its own database. In CI: one database per job.
 
 ## Decisions already made — do not re-ask
 
-| #   | Decision                                                                                                                                                  |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Database:** PostgreSQL + PostGIS. S3 for media bytes only — never application records.                                                                  |
-| 4   | **Trading mode:** interest category only, no trading functionality.                                                                                       |
-| 13  | **Payments are not this codebase's job.** No processor, no checkout, no webhook, no receipt validation. RevenueCat is handled in the mobile app. This backend READS subscription rows to resolve entitlement and serve the paywall catalogue, and has no way to create one. |
+| #   | Decision                                                                                                                                                                                                                                                                                                                            |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Database:** PostgreSQL + PostGIS. S3 for media bytes only — never application records.                                                                                                                                                                                                                                            |
+| 4   | **Trading mode:** interest category only, no trading functionality.                                                                                                                                                                                                                                                                 |
+| 13  | **Payments are not this codebase's job.** No processor, no checkout, no webhook, no receipt validation. RevenueCat is handled in the mobile app. This backend READS subscription rows to resolve entitlement and serve the paywall catalogue, and has no way to create one.                                                         |
 | 2,3 | **Four SKUs:** Basic and Premium × monthly and yearly. Annual is a third off. No quarterly (sells to nobody), no weekly (a churn machine), no free trial in v1. Tier matrix unchanged from the Batch 6 provisional. Prices here are the paywall CATALOGUE and are informational — the backend cannot change what anyone is charged. |
-| 5   | **"Requests" tab:** a **likes-you inbox** — profiles, not messages. Users cannot message before matching, so a conversation always has a match behind it. |
-| 11  | **Study Buddy groups:** one-to-one only in v1. Every conversation has exactly two participants.                                                           |
-| —   | **Runtime:** Node 24 instead of the spec's EOL Node 20.                                                                                                   |
+| 5   | **"Requests" tab:** a **likes-you inbox** — profiles, not messages. Users cannot message before matching, so a conversation always has a match behind it.                                                                                                                                                                           |
+| 11  | **Study Buddy groups:** one-to-one only in v1. Every conversation has exactly two participants.                                                                                                                                                                                                                                     |
+| —   | **Runtime:** Node 24 instead of the spec's EOL Node 20.                                                                                                                                                                                                                                                                             |
 
 ## Still open — ask before the batch that needs them
 
 Nothing currently blocks a batch.
 
-| #   | Question                                | Blocks | Status |
-| --- | --------------------------------------- | ------ | ------ |
-| 12  | Admin analytics — which metrics?        | —      | **Moot here.** Admin moves to its own repository (DECISIONS.md §1.2o), so this follows it. |
-| —   | Cloudflare R2 instead of S3 for media   | —      | Not blocking. Same SDK, different endpoint; the argument is egress cost at real traffic. |
+| #   | Question                              | Blocks | Status                                                                                     |
+| --- | ------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
+| 12  | Admin analytics — which metrics?      | —      | **Moot here.** Admin moves to its own repository (DECISIONS.md §1.2o), so this follows it. |
+| —   | Cloudflare R2 instead of S3 for media | —      | Not blocking. Same SDK, different endpoint; the argument is egress cost at real traffic.   |
 
 **Shipped on engineering placeholders, not PO decisions** (DECISIONS.md §1.2e).
 The PO can still overrule any of these; the table records what each costs to change.
 
-| #   | Placeholder |
-| --- | ----------- |
-| 7   | Free tier: 50 swipes/day per mode, 30 messages/day. Seed edit. |
-| 10  | Rewind is premium (basic and above). Seed edit. |
+| #   | Placeholder                                                                                                                         |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 7   | Free tier: 50 swipes/day per mode, 30 messages/day. Seed edit.                                                                      |
+| 10  | Rewind is premium (basic and above). Seed edit.                                                                                     |
 | 6   | Match expiry 14 days; the conversation goes read-only and stays visible. TTL is a constant; the conversation behaviour is **code**. |
-| 8   | Moderation is rules-based v1 behind a provider interface. Provider swap. |
-| —   | A blocked pair's conversation is frozen and visible; every other path 404s. **Code.** |
-| —   | Profile photo URLs are presigned S3 GETs, not CDN signed URLs — so Flutter's image cache misses on every render. |
+| 8   | Moderation is rules-based v1 behind a provider interface. Provider swap.                                                            |
+| —   | A blocked pair's conversation is frozen and visible; every other path 404s. **Code.**                                               |
+| —   | Profile photo URLs are presigned S3 GETs, not CDN signed URLs — so Flutter's image cache misses on every render.                    |
 
 ---
 
