@@ -115,6 +115,22 @@ export async function seedConnections(): Promise<{ matches: number; messages: nu
 
     matches += 1;
 
+    // Development matches must not rot.
+    //
+    // `createMatchIfMutual` is used deliberately above, so seeded matches go
+    // through exactly the path a real swipe does — including the production
+    // 14-day expiry. That is right for the creation logic and wrong for the
+    // data: two weeks after a seed, every seeded match expires and staging
+    // silently loses chat, plans and calling, because all three refuse on an
+    // expired match. It presents as "the API is broken" to whoever is testing.
+    //
+    // Pushed out here rather than by parameterising the real function, which
+    // would put a test-only knob in production code.
+    await prisma.match.update({
+      where: { id: match.id },
+      data: { expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) },
+    });
+
     const conversation = await prisma.conversation.findUnique({
       where: { match_id: match.id },
       select: { id: true, messages: { select: { id: true }, take: 1 } },

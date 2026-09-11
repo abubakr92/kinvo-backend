@@ -1,6 +1,6 @@
 import twilio, { type Twilio } from 'twilio';
 
-import { env, isProduction } from '@config/env';
+import { env, thirdPartyIntegrationsRequired } from '@config/env';
 import { ApiError } from '@utils/api-error';
 import { ERROR_CODES } from '@utils/error-codes';
 import { logger } from '@utils/logger';
@@ -83,10 +83,13 @@ const twilioProvider: OtpProvider = {
 /**
  * Development stand-in for machines without Twilio credentials.
  *
- * Safe by construction: env validation makes all three Twilio variables
- * mandatory in production, so `hasCredentials()` is always true there and this
- * object can never be selected. It is still guarded on NODE_ENV as a second
- * lock, because an OTP bypass reaching production would be catastrophic.
+ * Selected when Twilio is unconfigured AND the integration waiver is on. In a
+ * real production deployment the waiver is at its default of `true`, so env
+ * validation makes all three Twilio variables mandatory and this object can
+ * never be reached — an OTP bypass in production would be catastrophic.
+ *
+ * It IS reachable on staging, which is the point: staging has no Twilio account
+ * and still has to let the mobile team complete a phone sign-in.
  */
 const DEV_CODE = '000000';
 
@@ -112,11 +115,17 @@ export function getOtpProvider(): OtpProvider {
     return twilioProvider;
   }
 
-  if (isProduction) {
+  if (thirdPartyIntegrationsRequired) {
     // Unreachable: env validation rejects a production boot without these.
     // Kept as a hard stop in case that validation is ever loosened.
     throw new Error('Twilio credentials are required in production');
   }
+
+  // `thirdPartyIntegrationsRequired`, NOT `isProduction`. Staging runs with
+  // NODE_ENV=production and the integration waiver on, and branching on
+  // NODE_ENV alone made this throw there — so phone sign-in answered 500
+  // instead of falling back, from Batch 2 until staging was finally exercised.
+  logger.warn('Twilio is not configured and the integration waiver is on — using the OTP stub');
 
   return stubProvider;
 }

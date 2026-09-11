@@ -309,3 +309,23 @@ export const env: Env = parseEnv();
 export const isProduction = env.NODE_ENV === 'production';
 export const isDevelopment = env.NODE_ENV === 'development';
 export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * Must a missing third-party credential be fatal?
+ *
+ * Providers MUST test this rather than `isProduction`. The two are not the same
+ * thing on a deployed environment that has taken the integration waiver:
+ * `REQUIRE_THIRD_PARTY_INTEGRATIONS=false` is what lets staging run without
+ * Twilio, Google or Apple accounts, and the waiver's whole point is that those
+ * features degrade instead of the API refusing to serve.
+ *
+ * Getting this wrong is not theoretical. Both the OTP provider and the video
+ * provider branched on `isProduction` alone, so on staging — production
+ * NODE_ENV, waiver on — they threw a raw Error and the endpoint answered 500
+ * rather than falling back to its stub. Phone sign-in was broken there from
+ * Batch 2 and nobody noticed, because nothing exercised it against staging.
+ *
+ * Real production leaves this variable at its default of `true`, so the hard
+ * stop still fires where it matters.
+ */
+export const thirdPartyIntegrationsRequired = isProduction && env.REQUIRE_THIRD_PARTY_INTEGRATIONS;

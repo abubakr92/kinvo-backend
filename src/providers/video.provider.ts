@@ -1,6 +1,6 @@
 import twilio from 'twilio';
 
-import { env, isProduction } from '@config/env';
+import { env, thirdPartyIntegrationsRequired } from '@config/env';
 import { logger } from '@utils/logger';
 
 /**
@@ -116,8 +116,12 @@ const twilioVideoProvider: VideoProvider = {
  * against Twilio. A plausible-looking fake would be worse: it would let a test
  * or a staging client believe it had connected when it had not.
  *
- * Guarded on NODE_ENV as well as on credentials, so it cannot be selected in
- * production even if env validation is ever loosened.
+ * Selected when Twilio is unconfigured AND the integration waiver is on. A real
+ * production deployment leaves the waiver at its default, so env validation
+ * makes the credentials mandatory and this object cannot be reached there.
+ *
+ * It IS reachable on staging, deliberately — the call lifecycle is worth
+ * exercising end to end without a Twilio account.
  */
 const stubVideoProvider: VideoProvider = {
   name: 'stub',
@@ -152,13 +156,18 @@ export function getVideoProvider(): VideoProvider {
     return provider;
   }
 
-  if (isProduction) {
+  if (thirdPartyIntegrationsRequired) {
     // Unreachable while env validation requires these in production. Kept as a
     // hard stop: a production build handing out fake video tokens would look
     // like a broken client rather than a missing credential.
     throw new Error('Twilio Video credentials are required in production');
   }
 
+  // Tested against the WAIVER, not NODE_ENV. Staging is NODE_ENV=production
+  // with the waiver on, and branching on NODE_ENV made starting a call answer
+  // 500 there instead of returning a stub token the lifecycle can be exercised
+  // with. The stub is deliberately not a JWT, so nothing can mistake it for a
+  // working credential.
   provider = stubVideoProvider;
   return provider;
 }
